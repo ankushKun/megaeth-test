@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useWatchContractEvent } from "wagmi";
 import { CHATROOM_ADDRESS } from "../contracts/config";
 import ChatRoomABI from "../contracts/ChatRoomABI.json";
