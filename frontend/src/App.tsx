@@ -65,7 +65,7 @@ function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onMouseMove, onMo
 
 export default function App() {
   const account = useAccount();
-  const { mapRef, selectedPixel, hoveredPixel, handlePixelPlaced, placedPixelCount, focusOnPixel, loadVisibleTiles, handleMapClick, handleMapHover, handleMapHoverOut, loadInitialTiles, getSelectedPixelColor, updateSelectedHighlightColor } = useMap();
+  const { mapRef, selectedPixel, hoveredPixel, handlePixelPlaced, placedPixelCount, focusOnPixel, loadVisibleTiles, handleMapClick, handleMapHover, handleMapHoverOut, loadInitialTiles, getSelectedPixelColor, updateSelectedHighlightColor, isLoadingTiles } = useMap();
 
   // Throttle map movement to prevent RPC spam
   const lastMoveTimeRef = useRef<number>(0);
@@ -288,7 +288,21 @@ export default function App() {
             <h3 className="text-sm font-semibold text-white/90">Recent Pixels</h3>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {recentPixels.length === 0 ? (
+            {isLoadingTiles && recentPixels.length === 0 ? (
+              <div className="divide-y divide-white/10">
+                {[...Array(8)].map((_, index) => (
+                  <div key={index} className="p-3 animate-pulse">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white/10" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3 bg-white/10 rounded w-24" />
+                        <div className="h-3 bg-white/10 rounded w-20" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : recentPixels.length === 0 ? (
               <div className="p-4 text-center text-white/30 text-sm">
                 No pixels placed recently.
               </div>
@@ -321,6 +335,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      {/* End of Left Sidebar */}
 
       {/* Map Area */}
       <div className="grow relative">
