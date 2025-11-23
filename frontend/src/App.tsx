@@ -124,14 +124,14 @@ export default function App() {
   };
 
   return (
-    <div className='flex h-screen overflow-hidden bg-black'>
+    <div className='flex h-screen overflow-hidden bg-linear-to-br from-black via-zinc-950 to-black'>
       {/* Left Sidebar */}
-      <div className="w-80 border-r border-white/10 flex flex-col bg-white/5 backdrop-blur-xl">
-        <div className="p-4 border-b border-white/10">
+      <div className="w-80 border-r border-white/10 flex flex-col bg-white/3 backdrop-blur-sm">
+        <div className="p-4 border-b border-white/10 bg-linear-to-b from-white/5 to-transparent">
           <h2 className="text-xl font-bold text-white mb-4 tracking-wide">MegaPlace</h2>
 
           {/* Cooldown Timer */}
-          <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 mb-4 border border-white/20 shadow-lg">
+          <div className="bg-linear-to-br from-white/15 to-white/5 backdrop-blur-sm rounded-2xl p-4 mb-4 border border-white/20 shadow-2xl shadow-black/50">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm text-white/70">Cooldown</span>
               <span className={`text-lg font-bold ${canPlace ? 'text-white' : 'text-white/50'}`}>
@@ -146,11 +146,11 @@ export default function App() {
           </div>
 
           {/* Premium Access */}
-          <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20 shadow-lg">
+          <div className="bg-linear-to-br from-white/15 to-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/20 shadow-2xl shadow-black/50">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-semibold text-white">Premium</span>
               {hasAccess && (
-                <span className="text-xs bg-white/30 px-2 py-1 rounded-full backdrop-blur-sm">Active</span>
+                <span className="text-xs bg-linear-to-r from-white/30 to-white/20 px-3 py-1 rounded-full backdrop-blur-sm border border-white/30 shadow-lg">Active</span>
               )}
             </div>
             {hasAccess ? (
@@ -171,7 +171,7 @@ export default function App() {
                   type="button"
                   onClick={handlePurchasePremium}
                   disabled={!account.address || isPurchasingPremium}
-                  className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-white/90 hover:bg-white text-black backdrop-blur-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-linear-to-r from-white/95 to-white/90 hover:from-white hover:to-white/95 text-black backdrop-blur-sm shadow-xl shadow-white/10 border border-white/20"
                 >
                   {isPurchasingPremium ? 'Purchasing...' : 'Buy for 0.01 ETH'}
                 </button>
@@ -195,12 +195,12 @@ export default function App() {
                 {recentPixels.map((pixel, index) => (
                   <div
                     key={index}
-                    className="p-3 hover:bg-white/5 transition-colors cursor-pointer"
+                    className="p-3 hover:bg-white/8 transition-all duration-200 cursor-pointer backdrop-blur-sm"
                     onClick={() => focusOnPixel(Number(pixel.x), Number(pixel.y))}
                   >
                     <div className="flex items-center gap-3">
                       <div
-                        className="w-8 h-8 rounded-lg border border-white/20 shadow-md"
+                        className="w-8 h-8 rounded-lg border border-white/30 shadow-xl backdrop-blur-sm"
                         style={{ backgroundColor: uint32ToHex(pixel.color) }}
                       />
                       <div className="flex-1 min-w-0">
@@ -231,14 +231,14 @@ export default function App() {
 
         {/* Pixel Info Overlay */}
         {hoveredPixel && (
-          <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md text-white px-4 py-2 rounded-xl text-sm border border-white/20 shadow-lg">
+          <div className="absolute top-4 left-4 bg-linear-to-br from-black/70 to-black/50 backdrop-blur-sm text-white px-4 py-2 rounded-2xl text-sm border border-white/30 shadow-2xl shadow-black/50">
             Pixel: ({hoveredPixel.x}, {hoveredPixel.y})
           </div>
         )}
 
         {/* Color Picker and Place Button */}
         <div className='absolute bottom-0 left-0 right-0 p-4 flex items-center justify-center'>
-          <div className='bg-black/80 backdrop-blur-xl rounded-2xl p-4 shadow-2xl border border-white/20 max-w-4xl w-full'>
+          <div className='bg-linear-to-t from-black/80 via-black/70 to-black/60 backdrop-blur-sm rounded-3xl p-5 shadow-2xl border border-white/30 max-w-4xl w-full'>
             <div className="flex items-center gap-4">
               {/* Preset Colors */}
               <div className="flex gap-2 flex-wrap">
@@ -246,7 +246,7 @@ export default function App() {
                   <button
                     key={color}
                     onClick={() => setSelectedColor(color)}
-                    className={`w-10 h-10 rounded-lg border-2 transition-all hover:scale-110 ${selectedColor === color ? 'border-white shadow-xl shadow-white/20' : 'border-white/20'
+                    className={`w-10 h-10 rounded-xl border-2 transition-all hover:scale-110 backdrop-blur-sm ${selectedColor === color ? 'border-white shadow-2xl shadow-white/30 ring-2 ring-white/20 ring-offset-2 ring-offset-black/50' : 'border-white/30 hover:border-white/50'
                       }`}
                     style={{ backgroundColor: color }}
                     title={color}
@@ -263,7 +263,7 @@ export default function App() {
                     setCustomColor(e.target.value);
                     setSelectedColor(e.target.value);
                   }}
-                  className="w-10 h-10 rounded-lg cursor-pointer border border-white/20"
+                  className="w-10 h-10 rounded-xl cursor-pointer border-2 border-white/30 hover:border-white/50 transition-all shadow-lg backdrop-blur-sm"
                 />
                 <span className="text-xs text-white/60">Custom</span>
               </div>
@@ -287,7 +287,7 @@ export default function App() {
                 type="button"
                 onClick={handlePlacePixel}
                 disabled={!selectedPixel || !account.address || !canPlace || isPlacingPixel}
-                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-all disabled:pointer-events-none disabled:opacity-50 h-10 px-6 bg-white hover:bg-white/90 text-black backdrop-blur-sm shadow-lg"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition-all disabled:pointer-events-none disabled:opacity-50 h-10 px-6 bg-linear-to-r from-white via-white to-white/95 hover:from-white hover:via-white/95 hover:to-white/90 text-black backdrop-blur-sm shadow-2xl shadow-white/20 border border-white/30"
               >
                 {isPlacingPixel ? 'Placing...' : 'Place Pixel'}
               </button>
@@ -302,7 +302,7 @@ export default function App() {
       </div>
 
       {/* Right Sidebar */}
-      <div className="w-64 bg-white/5 backdrop-blur-xl border-l border-white/10 p-4 flex flex-col gap-4">
+      <div className="w-64 bg-white/3 backdrop-blur-sm border-l border-white/10 p-4 flex flex-col gap-4">
         {/* Connect Button */}
         <ConnectButton.Custom>
           {({ account: walletAccount, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {
@@ -326,7 +326,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={openConnectModal}
-                        className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-white/90 hover:bg-white text-black backdrop-blur-sm shadow-lg border border-white/20"
+                        className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-linear-to-r from-white/95 to-white/90 hover:from-white hover:to-white/95 text-black backdrop-blur-sm shadow-xl shadow-white/10 border border-white/30"
                       >
                         Connect Wallet
                       </button>
@@ -338,7 +338,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={openChainModal}
-                        className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm border border-white/20"
+                        className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 bg-linear-to-r from-white/20 to-white/15 hover:from-white/30 hover:to-white/25 text-white backdrop-blur-sm border border-white/30 shadow-xl shadow-black/50"
                       >
                         Wrong network
                       </button>
@@ -349,7 +349,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={openAccountModal}
-                      className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 border bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm"
+                      className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 h-9 px-4 py-2 border bg-linear-to-r from-white/12 to-white/8 hover:from-white/18 hover:to-white/12 text-white border-white/30 backdrop-blur-sm shadow-lg"
                     >
                       {walletAccount.address.slice(0, 6)}...{walletAccount.address.slice(-4)}
                     </button>
@@ -361,7 +361,7 @@ export default function App() {
         </ConnectButton.Custom>
 
         {/* Instructions */}
-        <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20 shadow-lg">
+        <div className="bg-linear-to-br from-white/15 to-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/20 shadow-2xl shadow-black/50">
           <h3 className="text-sm font-semibold text-white mb-3">How to Play</h3>
           <ul className="text-xs text-white/70 space-y-2">
             <li className="flex items-center gap-2">
@@ -388,7 +388,7 @@ export default function App() {
         </div>
 
         {/* Stats */}
-        <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/20 shadow-lg">
+        <div className="bg-linear-to-br from-white/15 to-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/20 shadow-2xl shadow-black/50">
           <h3 className="text-sm font-semibold text-white mb-3">Canvas Stats</h3>
           <div className="text-xs text-white/70 space-y-2">
             <div className="flex justify-between">
