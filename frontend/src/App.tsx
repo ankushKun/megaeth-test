@@ -1,7 +1,8 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
+import { useRef, useCallback } from 'react';
 import { Button } from './components/ui/button';
-import { useCanvas } from './hooks/useCanvas';
+import { useMap } from './hooks/useMap';
 import {
   useCooldown,
   usePremiumAccess,
@@ -12,8 +13,13 @@ import {
   uint32ToHex
 } from './hooks/useMegaplace';
 import { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import type { Map as LeafletMap } from 'leaflet';
+import { toast } from 'sonner';
 
 const PRESET_COLORS = [
+  '#000000', // Black
   '#FF0000', // Red
   '#00FF00', // Green
   '#0000FF', // Blue
@@ -21,26 +27,90 @@ const PRESET_COLORS = [
   '#FF00FF', // Magenta
   '#00FFFF', // Cyan
   '#FFFFFF', // White
-  '#000000', // Black
   '#FFA500', // Orange
   '#800080', // Purple
   '#FFC0CB', // Pink
   '#A52A2A', // Brown
 ];
 
+// Component to handle map events
+function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onMouseMove, onMouseOut }: {
+  onMapClick: (lat: number, lng: number) => void;
+  onMapReady: (map: LeafletMap) => void;
+  onMoveEnd: () => void;
+  onMouseMove?: (lat: number, lng: number) => void;
+  onMouseOut?: () => void;
+}) {
+  const map = useMapEvents({
+    click: (e) => {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+    mousemove: (e) => {
+      onMouseMove?.(e.latlng.lat, e.latlng.lng);
+    },
+    mouseout: () => {
+      onMouseOut?.();
+    },
+    moveend: () => {
+      onMoveEnd();
+    },
+  });
+
+  useEffect(() => {
+    onMapReady(map);
+  }, [map, onMapReady]);
+
+  return null;
+}
+
 export default function App() {
   const account = useAccount();
-  const { canvasRef, selectedPixel, hoveredPixel, handlePixelPlaced, handlers, placedPixelCount, focusOnPixel } = useCanvas();
+  const { mapRef, selectedPixel, hoveredPixel, handlePixelPlaced, placedPixelCount, focusOnPixel, loadVisibleTiles, handleMapClick, handleMapHover, handleMapHoverOut, loadInitialTiles, getSelectedPixelColor, updateSelectedHighlightColor } = useMap();
+
+  // Throttle map movement to prevent RPC spam
+  const lastMoveTimeRef = useRef<number>(0);
+  const throttledLoadVisibleTiles = useCallback(() => {
+    const now = Date.now();
+    if (now - lastMoveTimeRef.current < 500) return; // Throttle to max once per 500ms
+    lastMoveTimeRef.current = now;
+    loadVisibleTiles();
+  }, [loadVisibleTiles]);
   const { canPlace, cooldownRemaining, refetch: refetchCooldown } = useCooldown();
   const { hasAccess, expiryTime } = usePremiumAccess();
   const { placePixel, isPending: isPlacingPixel } = usePlacePixel();
   const { grantPremiumAccess, isPending: isPurchasingPremium } = useGrantPremiumAccess();
   const { recentPixels } = useWatchPixelPlaced(handlePixelPlaced);
 
-  const [selectedColor, setSelectedColor] = useState('#FF0000');
-  const [customColor, setCustomColor] = useState('#FF0000');
+  const [selectedColor, setSelectedColor] = useState('#000000');
+  const [customColor, setCustomColor] = useState('#000000');
   const [cooldownDisplay, setCooldownDisplay] = useState('');
   const [premiumTimeRemaining, setPremiumTimeRemaining] = useState('');
+
+  // Navigate to pixel from URL parameters on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pxParam = params.get('px');
+    const pyParam = params.get('py');
+
+    if (pxParam && pyParam) {
+      const px = parseInt(pxParam, 10);
+      const py = parseInt(pyParam, 10);
+
+      if (!isNaN(px) && !isNaN(py)) {
+        // Wait a bit for map to initialize
+        setTimeout(() => {
+          focusOnPixel(px, py);
+        }, 500);
+      }
+    }
+  }, [focusOnPixel]);
+
+  // Update selected pixel highlight when color changes
+  useEffect(() => {
+    if (selectedPixel) {
+      updateSelectedHighlightColor(selectedColor);
+    }
+  }, [selectedColor, selectedPixel, updateSelectedHighlightColor]);
 
   // Update cooldown display every second
   useEffect(() => {
@@ -104,7 +174,7 @@ export default function App() {
 
     try {
       const color = hexToUint32(selectedColor);
-      await placePixel(selectedPixel.x, selectedPixel.y, color);
+      await placePixel(selectedPixel.px, selectedPixel.py, color);
     } catch (error) {
       console.error('Failed to place pixel:', error);
     }
@@ -188,7 +258,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto">
             {recentPixels.length === 0 ? (
               <div className="p-4 text-center text-white/30 text-sm">
-                No recent pixels
+                No pixels placed recently.
               </div>
             ) : (
               <div className="divide-y divide-white/10">
@@ -220,19 +290,47 @@ export default function App() {
         </div>
       </div>
 
-      {/* Canvas Area */}
+      {/* Map Area */}
       <div className="grow relative">
-        <canvas
-          ref={canvasRef}
-          id="mega-canvas"
-          className="w-full h-full"
-          {...handlers}
-        />
+        <MapContainer
+          center={[37.757, -122.4376]}
+          zoom={7}
+          minZoom={5}
+          maxZoom={20}
+          className="w-full h-full cursor-default"
+          zoomControl={true}
+          worldCopyJump={false}
+          maxBounds={[[-90, -180], [90, 180]]}
+          maxBoundsViscosity={1.0}
+          attributionControl={false}
+          scrollWheelZoom={true}
+          easeLinearity={0.25}
+        >
+          <TileLayer
+            attribution='<a href="https://www.openstreetmap.org">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            noWrap={true}
+          />
+          <MapEventsHandler
+            onMapClick={(lat, lng) => handleMapClick(lat, lng, selectedColor)}
+            onMapReady={(map) => {
+              mapRef.current = map;
+              loadInitialTiles();
+            }}
+            onMoveEnd={throttledLoadVisibleTiles}
+            onMouseMove={(lat, lng) => handleMapHover(lat, lng, selectedColor)}
+            onMouseOut={handleMapHoverOut}
+          />
+        </MapContainer>
 
-        {/* Pixel Info Overlay */}
+        {/* Position Display - Top Right */}
         {hoveredPixel && (
-          <div className="absolute top-4 left-4 bg-linear-to-br from-black/70 to-black/50 backdrop-blur-sm text-white px-4 py-2 rounded-2xl text-sm border border-white/30 shadow-2xl shadow-black/50">
-            Pixel: ({hoveredPixel.x}, {hoveredPixel.y})
+          <div className="absolute top-4 right-4 bg-linear-to-br from-black/70 to-black/50 backdrop-blur-sm text-white px-4 py-2 rounded-2xl text-sm border border-white/30 shadow-2xl shadow-black/50">
+            <div className="font-mono">
+              <span className="text-white/70">X:</span> <span className="text-white font-semibold">{hoveredPixel.px}</span>
+              <span className="text-white/40 mx-2">|</span>
+              <span className="text-white/70">Y:</span> <span className="text-white font-semibold">{hoveredPixel.py}</span>
+            </div>
           </div>
         )}
 
@@ -246,7 +344,7 @@ export default function App() {
                   <button
                     key={color}
                     onClick={() => setSelectedColor(color)}
-                    className={`w-10 h-10 rounded-xl border-2 transition-all hover:scale-110 backdrop-blur-sm ${selectedColor === color ? 'border-white shadow-2xl shadow-white/30 ring-2 ring-white/20 ring-offset-2 ring-offset-black/50' : 'border-white/30 hover:border-white/50'
+                    className={`w-10 h-10 border-2 transition-all hover:scale-110 backdrop-blur-sm ${selectedColor === color ? 'border-white shadow-2xl shadow-white/30 ring-2 ring-white/20 ring-offset-2 ring-offset-black/50' : 'border-white/30 hover:border-white/50'
                       }`}
                     style={{ backgroundColor: color }}
                     title={color}
@@ -256,6 +354,7 @@ export default function App() {
 
               {/* Custom Color Picker */}
               <div className="flex items-center gap-2">
+                <span className="text-xs text-white/60"> or custom</span>
                 <input
                   type="color"
                   value={customColor}
@@ -263,24 +362,12 @@ export default function App() {
                     setCustomColor(e.target.value);
                     setSelectedColor(e.target.value);
                   }}
-                  className="w-10 h-10 rounded-xl cursor-pointer border-2 border-white/30 hover:border-white/50 transition-all shadow-lg backdrop-blur-sm"
+                  className="w-10 h-10 cursor-pointer border-2 border-white/30 hover:border-white/50 transition-all shadow-lg backdrop-blur-sm"
                 />
-                <span className="text-xs text-white/60">Custom</span>
               </div>
 
               {/* Divider */}
               <div className="h-10 w-px bg-white/20" />
-
-              {/* Selected Pixel Info */}
-              <div className="flex-1 text-sm text-white/90">
-                {selectedPixel ? (
-                  <div>
-                    Selected: <span className="font-mono text-white">({selectedPixel.x}, {selectedPixel.y})</span>
-                  </div>
-                ) : (
-                  <div className="text-white/40">Click a pixel to select</div>
-                )}
-              </div>
 
               {/* Place Button */}
               <button
@@ -295,7 +382,7 @@ export default function App() {
 
             {/* Help Text */}
             <div className="text-xs text-white/40 mt-3 text-center">
-              Use mouse wheel to zoom, drag to pan, click to select a pixel
+              Click anywhere on the map to select a location, zoom and pan to explore
             </div>
           </div>
         </div>
@@ -366,22 +453,18 @@ export default function App() {
           <ul className="text-xs text-white/70 space-y-2">
             <li className="flex items-center gap-2">
               <span className="text-white/40">1.</span>
-              <span>Connect your wallet</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-white/40">2.</span>
               <span>Click a pixel on the canvas</span>
             </li>
             <li className="flex items-center gap-2">
-              <span className="text-white/40">3.</span>
+              <span className="text-white/40">2.</span>
               <span>Choose a color</span>
             </li>
             <li className="flex items-center gap-2">
-              <span className="text-white/40">4.</span>
+              <span className="text-white/40">3.</span>
               <span>Place your pixel!</span>
             </li>
             <li className="flex items-center gap-2">
-              <span className="text-white/40">5.</span>
+              <span className="text-white/40">4.</span>
               <span>Wait 15s or buy premium</span>
             </li>
           </ul>
@@ -393,19 +476,15 @@ export default function App() {
           <div className="text-xs text-white/70 space-y-2">
             <div className="flex justify-between">
               <span className="text-white/50">Size</span>
-              <span className="font-mono">1000 × 1000</span>
+              <span className="font-mono">1,048,576 × 1,048,576</span>
             </div>
             <div className="flex justify-between">
               <span className="text-white/50">Total Pixels</span>
-              <span className="font-mono">1,000,000</span>
+              <span className="font-mono">~1.1 trillion</span>
             </div>
             <div className="flex justify-between">
               <span className="text-white/50">Pixels Placed</span>
               <span className="font-mono">{placedPixelCount.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/50">Empty Pixels</span>
-              <span className="font-mono">{(1000000 - placedPixelCount).toLocaleString()}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-white/50">Network</span>
@@ -413,6 +492,14 @@ export default function App() {
             </div>
           </div>
         </div>
+        <Button disabled={!selectedPixel} onClick={() => {
+          if (!selectedPixel) return;
+          const shareUrl = `${window.location.origin}?px=${selectedPixel.px}&py=${selectedPixel.py}`;
+          navigator.clipboard.writeText(shareUrl);
+          toast.success('Shareable link copied to clipboard!');
+        }}>
+          Share selected
+        </Button>
       </div>
     </div>
   );

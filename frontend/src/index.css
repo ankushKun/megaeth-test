@@ -114,7 +114,31 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Leaflet map styles */
+.leaflet-container {
+  z-index: 0;
+  cursor: default !important;
+}
+
+.leaflet-grab {
+  cursor: default !important;
+}
+
+.leaflet-dragging .leaflet-grab {
+  cursor: default !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+}
+
+.leaflet-popup-tip {
+  background: rgba(0, 0, 0, 0.8);
 }

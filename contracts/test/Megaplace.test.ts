@@ -3,6 +3,10 @@ import { ethers, network } from "hardhat";
 import { Megaplace } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+// Constants matching the contract
+const CANVAS_RES = 1048576; // 2^20
+const TILE_SIZE = 512;
+
 // Helper functions for time manipulation
 async function getCurrentTime(): Promise<number> {
   const block = await ethers.provider.getBlock('latest');
@@ -63,19 +67,19 @@ describe("Megaplace", function () {
       expect(pixel.timestamp).to.be.gt(0);
     });
 
-    it("Should reject invalid x coordinate (>= 1000)", async function () {
-      await expect(megaplace.connect(user1).placePixel(1000, 0, 0xff0000))
+    it("Should reject invalid x coordinate (>= CANVAS_RES)", async function () {
+      await expect(megaplace.connect(user1).placePixel(CANVAS_RES, 0, 0xff0000))
         .to.be.revertedWith("Megaplace: invalid coordinates");
 
-      await expect(megaplace.connect(user1).placePixel(1001, 0, 0xff0000))
+      await expect(megaplace.connect(user1).placePixel(CANVAS_RES + 1, 0, 0xff0000))
         .to.be.revertedWith("Megaplace: invalid coordinates");
     });
 
-    it("Should reject invalid y coordinate (>= 1000)", async function () {
-      await expect(megaplace.connect(user1).placePixel(0, 1000, 0xff0000))
+    it("Should reject invalid y coordinate (>= CANVAS_RES)", async function () {
+      await expect(megaplace.connect(user1).placePixel(0, CANVAS_RES, 0xff0000))
         .to.be.revertedWith("Megaplace: invalid coordinates");
 
-      await expect(megaplace.connect(user1).placePixel(0, 1001, 0xff0000))
+      await expect(megaplace.connect(user1).placePixel(0, CANVAS_RES + 1, 0xff0000))
         .to.be.revertedWith("Megaplace: invalid coordinates");
     });
 
@@ -230,11 +234,11 @@ describe("Megaplace", function () {
 
     it("Should reject batch with invalid coordinates", async function () {
       await expect(
-        megaplace.connect(user1).placePixelBatch([1000], [0], [0xff0000])
+        megaplace.connect(user1).placePixelBatch([CANVAS_RES], [0], [0xff0000])
       ).to.be.revertedWith("Megaplace: invalid coordinates");
 
       await expect(
-        megaplace.connect(user1).placePixelBatch([0, 1, 1000], [0, 1, 0], [0xff0000, 0x00ff00, 0x0000ff])
+        megaplace.connect(user1).placePixelBatch([0, 1, CANVAS_RES], [0, 1, 0], [0xff0000, 0x00ff00, 0x0000ff])
       ).to.be.revertedWith("Megaplace: invalid coordinates");
     });
 
@@ -426,10 +430,10 @@ describe("Megaplace", function () {
       });
 
       it("Should reject invalid coordinates", async function () {
-        await expect(megaplace.getPixel(1000, 0))
+        await expect(megaplace.getPixel(CANVAS_RES, 0))
           .to.be.revertedWith("Megaplace: invalid coordinates");
 
-        await expect(megaplace.getPixel(0, 1000))
+        await expect(megaplace.getPixel(0, CANVAS_RES))
           .to.be.revertedWith("Megaplace: invalid coordinates");
       });
     });
@@ -479,7 +483,7 @@ describe("Megaplace", function () {
       });
 
       it("Should reject invalid coordinates in batch", async function () {
-        await expect(megaplace.getPixelBatch([0, 1000], [0, 0]))
+        await expect(megaplace.getPixelBatch([CANVAS_RES], [0]))
           .to.be.revertedWith("Megaplace: invalid coordinates");
       });
     });
@@ -502,37 +506,32 @@ describe("Megaplace", function () {
       });
 
       it("Should reject invalid start coordinates", async function () {
-        await expect(megaplace.getRegion(1000, 0, 1, 1))
+        await expect(megaplace.getRegion(CANVAS_RES, 0, 1, 1))
           .to.be.revertedWith("Megaplace: invalid start coordinates");
 
-        await expect(megaplace.getRegion(0, 1000, 1, 1))
+        await expect(megaplace.getRegion(0, CANVAS_RES, 1, 1))
           .to.be.revertedWith("Megaplace: invalid start coordinates");
       });
 
       it("Should reject region out of bounds", async function () {
-        await expect(megaplace.getRegion(999, 0, 2, 1))
+        await expect(megaplace.getRegion(CANVAS_RES - 1, 0, 2, 1))
           .to.be.revertedWith("Megaplace: region out of bounds");
 
-        await expect(megaplace.getRegion(0, 999, 1, 2))
+        await expect(megaplace.getRegion(0, CANVAS_RES - 1, 1, 2))
           .to.be.revertedWith("Megaplace: region out of bounds");
       });
 
-      it("Should reject region too large (> 10000 pixels)", async function () {
-        await expect(megaplace.getRegion(0, 0, 101, 100))
-          .to.be.revertedWith("Megaplace: region too large");
-      });
-
-      it("Should accept maximum region size (10000 pixels)", async function () {
+      it("Should accept large region size (100x100)", async function () {
         const colors = await megaplace.getRegion(0, 0, 100, 100);
         expect(colors.length).to.equal(10000);
       });
 
       it("Should reject zero width or height", async function () {
         await expect(megaplace.getRegion(0, 0, 0, 10))
-          .to.be.revertedWith("Megaplace: region too large");
+          .to.be.revertedWith("Megaplace: invalid dimensions");
 
         await expect(megaplace.getRegion(0, 0, 10, 0))
-          .to.be.revertedWith("Megaplace: region too large");
+          .to.be.revertedWith("Megaplace: invalid dimensions");
       });
     });
 

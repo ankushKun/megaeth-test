@@ -1,5 +1,5 @@
 // Contract addresses
-export const MEGAPLACE_ADDRESS = "0x8777D01C37a59f26bA9739F1b723A24A3A732696" as const;
+export const MEGAPLACE_ADDRESS = "0xF7bB0ba31c14ff85c582f2b6F45355abe01dCB07" as const;
 
 export const MEGAETH_CHAIN = {
   id: 6343,

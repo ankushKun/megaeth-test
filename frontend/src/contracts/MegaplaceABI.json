@@ -67,6 +67,32 @@
     "type": "event"
   },
   {
+    "inputs": [],
+    "name": "CANVAS_RES",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "TILE_SIZE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -149,12 +175,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "x",
+        "name": "px",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "y",
+        "name": "py",
         "type": "uint256"
       }
     ],
@@ -183,12 +209,12 @@
     "inputs": [
       {
         "internalType": "uint256[]",
-        "name": "x",
+        "name": "px",
         "type": "uint256[]"
       },
       {
         "internalType": "uint256[]",
-        "name": "y",
+        "name": "py",
         "type": "uint256[]"
       }
     ],
@@ -217,12 +243,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "startX",
+        "name": "startPx",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "startY",
+        "name": "startPy",
         "type": "uint256"
       },
       {
@@ -314,12 +340,12 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "x",
+        "name": "px",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "y",
+        "name": "py",
         "type": "uint256"
       },
       {
@@ -337,12 +363,12 @@
     "inputs": [
       {
         "internalType": "uint256[]",
-        "name": "x",
+        "name": "px",
         "type": "uint256[]"
       },
       {
         "internalType": "uint256[]",
-        "name": "y",
+        "name": "py",
         "type": "uint256[]"
       },
       {
