@@ -1,6 +1,6 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import { Button } from './components/ui/button';
 import { useMap } from './hooks/useMap';
 import {
@@ -12,7 +12,6 @@ import {
   hexToUint32,
   uint32ToHex
 } from './hooks/useMegaplace';
-import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Map as LeafletMap } from 'leaflet';
@@ -34,10 +33,11 @@ const PRESET_COLORS = [
 ];
 
 // Component to handle map events
-function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onMouseMove, onMouseOut }: {
+function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onZoomEnd, onMouseMove, onMouseOut }: {
   onMapClick: (lat: number, lng: number) => void;
   onMapReady: (map: LeafletMap) => void;
   onMoveEnd: () => void;
+  onZoomEnd?: () => void;
   onMouseMove?: (lat: number, lng: number) => void;
   onMouseOut?: () => void;
 }) {
@@ -54,6 +54,9 @@ function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onMouseMove, onMo
     moveend: () => {
       onMoveEnd();
     },
+    zoomend: () => {
+      onZoomEnd?.();
+    },
   });
 
   useEffect(() => {
@@ -65,7 +68,7 @@ function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onMouseMove, onMo
 
 export default function App() {
   const account = useAccount();
-  const { mapRef, selectedPixel, hoveredPixel, handlePixelPlaced, placedPixelCount, focusOnPixel, loadVisibleTiles, handleMapClick, handleMapHover, handleMapHoverOut, loadInitialTiles, getSelectedPixelColor, updateSelectedHighlightColor, isLoadingTiles } = useMap();
+  const { mapRef, selectedPixel, hoveredPixel, handlePixelPlaced, placedPixelCount, focusOnPixel, loadVisibleTiles, handleMapClick, handleMapHover, handleMapHoverOut, loadInitialTiles, getSelectedPixelColor, updateSelectedHighlightColor, isLoadingFromBackend, initializeMap, backendPixels } = useMap();
 
   // Throttle map movement to prevent RPC spam
   const lastMoveTimeRef = useRef<number>(0);
@@ -80,6 +83,12 @@ export default function App() {
   const { placePixel, isPending: isPlacingPixel, isConfirmed: isPixelPlaced, hash: pixelHash } = usePlacePixel();
   const { grantPremiumAccess, isPending: isPurchasingPremium } = useGrantPremiumAccess();
   const { recentPixels } = useWatchPixelPlaced(handlePixelPlaced);
+
+  // Combine backend pixels and live pixels, sorted by timestamp (most recent first)
+  const allPixels = useMemo(() => {
+    return [...backendPixels, ...recentPixels]
+      .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+  }, [backendPixels, recentPixels]);
 
   const [selectedColor, setSelectedColor] = useState('#000000');
   const [customColor, setCustomColor] = useState('#000000');
@@ -108,9 +117,9 @@ export default function App() {
           hasNavigatedRef.current = true;
         }, 500);
       }
-    } else if (recentPixels.length > 0) {
+    } else if (allPixels.length > 0) {
       // Choose a random pixel from recent pixels
-      const randomPixel = recentPixels[Math.floor(Math.random() * recentPixels.length)];
+      const randomPixel = allPixels[Math.floor(Math.random() * allPixels.length)];
       setTimeout(() => {
         focusOnPixel(Number(randomPixel.x), Number(randomPixel.y));
         hasNavigatedRef.current = true;
@@ -288,7 +297,7 @@ export default function App() {
             <h3 className="text-sm font-semibold text-white/90">Recent Pixels</h3>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {isLoadingTiles && recentPixels.length === 0 ? (
+            {isLoadingFromBackend && allPixels.length === 0 ? (
               <div className="divide-y divide-white/10">
                 {[...Array(8)].map((_, index) => (
                   <div key={index} className="p-3 animate-pulse">
@@ -302,13 +311,13 @@ export default function App() {
                   </div>
                 ))}
               </div>
-            ) : recentPixels.length === 0 ? (
+            ) : allPixels.length === 0 ? (
               <div className="p-4 text-center text-white/30 text-sm">
                 No pixels placed recently.
               </div>
             ) : (
               <div className="divide-y divide-white/10">
-                {recentPixels.map((pixel, index) => (
+                {allPixels.map((pixel, index) => (
                   <div
                     key={index}
                     className="p-3 hover:bg-white/8 transition-all duration-200 cursor-pointer backdrop-blur-sm"
@@ -342,8 +351,8 @@ export default function App() {
         <MapContainer
           center={[37.757, -122.4376]}
           zoom={7}
-          minZoom={5}
-          maxZoom={20}
+          minZoom={3}
+          maxZoom={18}
           className="w-full h-full cursor-default"
           zoomControl={true}
           worldCopyJump={false}
@@ -361,10 +370,11 @@ export default function App() {
           <MapEventsHandler
             onMapClick={(lat, lng) => handleMapClick(lat, lng, selectedColor)}
             onMapReady={(map) => {
-              mapRef.current = map;
+              initializeMap(map);
               loadInitialTiles();
             }}
             onMoveEnd={throttledLoadVisibleTiles}
+            onZoomEnd={throttledLoadVisibleTiles}
             onMouseMove={(lat, lng) => handleMapHover(lat, lng, selectedColor)}
             onMouseOut={handleMapHoverOut}
           />

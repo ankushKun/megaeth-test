@@ -1,6 +1,6 @@
 # MegaETH Megaplace DApp
 
-A full-stack decentralized pixel canvas application built on the MegaETH Testnet. This monorepo contains both the Solidity smart contracts and a React-based frontend for interacting with the blockchain.
+A full-stack decentralized pixel canvas application built on the MegaETH Testnet. This monorepo contains the Solidity smart contracts, an Express backend event listener, and a React-based frontend.
 
 ## Project Structure
 
@@ -17,11 +17,24 @@ mega-test/
 │   ├── package.json      # Contract workspace dependencies
 │   └── .env.example      # Environment variables template
 │
+├── backend/              # Express backend (event listener)
+│   ├── src/
+│   │   ├── index.ts            # Main entry point
+│   │   ├── app.ts              # Express app setup
+│   │   ├── eventListener.ts    # Contract event watcher
+│   │   └── MegaplaceABI.json   # Contract ABI
+│   ├── data/             # JSON storage for pixel data
+│   ├── package.json      # Backend dependencies
+│   ├── tsconfig.json     # TypeScript config
+│   └── README.md         # Backend documentation
+│
 ├── frontend/             # React frontend workspace
 │   ├── src/
 │   │   ├── App.tsx       # Main application
 │   │   ├── components/   # React components
 │   │   ├── hooks/        # Custom Web3 hooks
+│   │   ├── services/     # API services
+│   │   │   └── backendApi.ts   # Backend API client
 │   │   └── contracts/    # Auto-generated from deployment
 │   │       ├── config.ts           # Contract address & network
 │   │       └── MegaplaceABI.json   # Contract ABI
@@ -32,6 +45,29 @@ mega-test/
 └── README.md            # This file
 ```
 
+## Architecture
+
+### 1. Smart Contract (Solidity)
+- Stores pixel placement data on-chain
+- Emits `PixelPlaced` events
+- Optimized for gas efficiency with packed structs
+- Rate limiting and premium access features
+
+### 2. Backend (Node.js + Express)
+- **Event Listener**: Syncs historical events and watches for new ones
+- **JSON Storage**: Stores pixel data for fast retrieval
+- **REST API**: Provides endpoints for frontend to fetch pixel data
+- **Benefits**:
+  - Reduces RPC calls from frontend
+  - Fast initial load
+  - Persistent cache across sessions
+
+### 3. Frontend (React + Vite)
+- **Initial Load**: Fetches all pixels from backend API
+- **Real-time Updates**: Listens to contract events directly
+- **Hybrid Approach**: Best of both worlds - fast load + real-time sync
+- Interactive map interface with Leaflet
+
 ## Technology Stack
 
 ### Smart Contracts
@@ -40,6 +76,13 @@ mega-test/
 - **OpenZeppelin** 5.0.0 - Contract standards
 - **TypeScript** - Type-safe scripting
 - **Mocha + Chai** - Testing framework
+
+### Backend
+- **Express** 4.18.2 - Web framework
+- **Viem** 2.21.54 - Ethereum client
+- **TypeScript** 5.3.3 - Type safety
+- **Compression** - Response compression
+- **CORS** - Cross-origin support
 
 ### Frontend
 - **React** 18.3.1 - UI framework
@@ -275,19 +318,19 @@ bun run test
 
 ### Root Package Scripts
 
-| Command | Description |
-|---------|-------------|
-| `bun run contracts:compile` | Compile smart contracts |
-| `bun run contracts:test` | Run contract tests |
-| `bun run contracts:deploy` | Deploy to MegaETH + update frontend |
-| `bun run contracts:verify` | Verify contract on explorer |
-| `bun run frontend:dev` | Start frontend dev server |
-| `bun run frontend:build` | Build frontend for production |
-| `bun run dev` | Start frontend (alias) |
-| `bun run build` | Build contracts + frontend |
-| `bun run deploy` | Compile + deploy contracts |
-| `bun run test` | Run contract tests |
-| `bun run clean` | Clean all build artifacts |
+| Command                     | Description                         |
+| --------------------------- | ----------------------------------- |
+| `bun run contracts:compile` | Compile smart contracts             |
+| `bun run contracts:test`    | Run contract tests                  |
+| `bun run contracts:deploy`  | Deploy to MegaETH + update frontend |
+| `bun run contracts:verify`  | Verify contract on explorer         |
+| `bun run frontend:dev`      | Start frontend dev server           |
+| `bun run frontend:build`    | Build frontend for production       |
+| `bun run dev`               | Start frontend (alias)              |
+| `bun run build`             | Build contracts + frontend          |
+| `bun run deploy`            | Compile + deploy contracts          |
+| `bun run test`              | Run contract tests                  |
+| `bun run clean`             | Clean all build artifacts           |
 
 ## Project Highlights
 

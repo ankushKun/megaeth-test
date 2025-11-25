@@ -1,7 +1,7 @@
 import { useAccount, useReadContract, useWriteContract, useWatchContractEvent, usePublicClient, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther } from 'viem';
 import type { Abi } from 'viem';
-import { MEGAPLACE_ADDRESS } from '../contracts/config';
+import { MEGAPLACE_ADDRESS, MEGAPLACE_DEPLOYMENT_BLOCK } from '../contracts/config';
 import MegaplaceABI from '../contracts/MegaplaceABI.json';
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'sonner';
@@ -341,90 +341,78 @@ export function useWatchPixelPlaced(onPixelPlaced?: (event: PixelPlacedEvent) =>
     onPixelPlacedRef.current = onPixelPlaced;
   }, [onPixelPlaced]);
 
-  // Load recent historical events on mount
+  // Load recent historical events on mount - simplified to avoid rate limiting
+  // Instead of querying all historical events, we'll rely on contract storage reads
+  // and only watch for new real-time events
   useEffect(() => {
-    const loadRecentEvents = async () => {
+    const loadRecentPixelsFromStorage = async () => {
       if (!publicClient) return;
 
       try {
-        console.log('Loading recent pixel events...');
-        const currentBlock = await publicClient.getBlockNumber();
-        const targetFromBlock = currentBlock > 10000n ? currentBlock - 10000n : 0n;
+        console.log('Loading recent pixels from contract storage...');
 
-        // RPC has max block range of 10000, so we need to chunk if needed
-        const MAX_BLOCK_RANGE = 10000n;
-        const allLogs: any[] = [];
+        // Sample 100 random coordinates to find recently placed pixels
+        // This avoids expensive historical event queries
+        const SAMPLE_SIZE = 100;
+        const CANVAS_SIZE = 1000;
+        const recentPixelsList: PixelPlacedEvent[] = [];
 
-        let fromBlock = targetFromBlock;
-        while (fromBlock <= currentBlock) {
-          const toBlock = fromBlock + MAX_BLOCK_RANGE - 1n > currentBlock
-            ? currentBlock
-            : fromBlock + MAX_BLOCK_RANGE - 1n;
-
-          console.log(`Fetching events from block ${fromBlock} to ${toBlock}`);
-
-          const logs = await publicClient.getLogs({
-            address: MEGAPLACE_ADDRESS,
-            event: {
-              type: 'event',
-              name: 'PixelPlaced',
-              inputs: [
-                { type: 'address', name: 'user', indexed: true },
-                { type: 'uint256', name: 'x', indexed: false },
-                { type: 'uint256', name: 'y', indexed: false },
-                { type: 'uint32', name: 'color', indexed: false },
-                { type: 'uint256', name: 'timestamp', indexed: false },
-              ],
-            },
-            fromBlock,
-            toBlock,
+        const sampleCoords: { x: number; y: number }[] = [];
+        for (let i = 0; i < SAMPLE_SIZE; i++) {
+          sampleCoords.push({
+            x: Math.floor(Math.random() * CANVAS_SIZE),
+            y: Math.floor(Math.random() * CANVAS_SIZE),
           });
-
-          allLogs.push(...logs);
-          fromBlock = toBlock + 1n;
         }
 
-        console.log(`Found ${allLogs.length} pixel events`);
+        // Batch read pixels
+        const xCoords = sampleCoords.map(c => BigInt(c.x));
+        const yCoords = sampleCoords.map(c => BigInt(c.y));
 
-        // Process logs and extract most recent 20
-        const events: PixelPlacedEvent[] = allLogs
-          .map((log: any) => {
-            try {
-              const user = log.args?.user as string;
-              const xRaw = log.args?.x;
-              const yRaw = log.args?.y;
-              const colorRaw = log.args?.color;
-              const timestampRaw = log.args?.timestamp;
+        // @ts-expect-error - viem type mismatch
+        const pixelData = await publicClient.readContract({
+          address: MEGAPLACE_ADDRESS,
+          abi: MegaplaceABI,
+          functionName: 'getPixelBatch',
+          args: [xCoords, yCoords],
+        });
 
-              return {
-                user,
-                x: typeof xRaw === 'bigint' ? xRaw : BigInt(xRaw),
-                y: typeof yRaw === 'bigint' ? yRaw : BigInt(yRaw),
-                color: typeof colorRaw === 'bigint' ? Number(colorRaw) : Number(colorRaw),
-                timestamp: typeof timestampRaw === 'bigint' ? timestampRaw : BigInt(timestampRaw),
-              };
-            } catch (error) {
-              console.error('Error parsing log:', error, log);
-              return null;
-            }
-          })
-          .filter((e): e is PixelPlacedEvent => e !== null)
-          .sort((a, b) => (a.timestamp > b.timestamp ? -1 : 1)) // Sort by timestamp descending
-          .slice(0, 20); // Take most recent 20
+        const colors = pixelData[0] as number[];
+        const placedByAddresses = pixelData[1] as string[];
+        const timestamps = pixelData[2] as bigint[];
 
-        console.log(`Processed ${events.length} recent pixels`, events);
-        setRecentPixels(events);
+        // Collect pixels that have been placed (color !== 0)
+        for (let i = 0; i < SAMPLE_SIZE; i++) {
+          const color = typeof colors[i] === 'bigint' ? Number(colors[i]) : colors[i];
+          if (color !== 0) {
+            recentPixelsList.push({
+              user: placedByAddresses[i],
+              x: BigInt(sampleCoords[i].x),
+              y: BigInt(sampleCoords[i].y),
+              color,
+              timestamp: timestamps[i],
+            });
+          }
+        }
 
-        // Notify callback for each event to update canvas
+        // Sort by timestamp and take most recent 20
+        const sortedPixels = recentPixelsList
+          .sort((a, b) => (a.timestamp > b.timestamp ? -1 : 1))
+          .slice(0, 20);
+
+        console.log(`Found ${sortedPixels.length} recent pixels from storage sampling`);
+        setRecentPixels(sortedPixels);
+
+        // Notify callback for each pixel to update canvas
         if (onPixelPlacedRef.current) {
-          events.forEach(event => {
+          sortedPixels.forEach(event => {
             onPixelPlacedRef.current?.(event);
           });
         }
 
-        console.log('Recent pixels loaded and displayed');
+        console.log('Recent pixels loaded from storage');
       } catch (error: any) {
-        console.error('Error loading recent pixel events:', error);
+        console.error('Error loading recent pixels from storage:', error);
         if (error?.message?.includes('rate limit') || error?.message?.includes('-32005') || error?.code === -32005) {
           toast.error('Rate Limited', {
             description: 'Unable to load recent pixels. The RPC is being rate limited.',
@@ -433,7 +421,7 @@ export function useWatchPixelPlaced(onPixelPlaced?: (event: PixelPlacedEvent) =>
       }
     };
 
-    loadRecentEvents();
+    loadRecentPixelsFromStorage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicClient]); // Only depend on publicClient to avoid infinite loops
 
