@@ -225,10 +225,30 @@ export default function App() {
   // Use session key for cooldown tracking
   const { canPlace, cooldownRemaining, pixelsRemaining, refetch: refetchCooldown } = useCooldown(sessionAddress ?? undefined);
   const { hasAccess } = usePremiumAccess();
-  const { placePixel, pendingCount, recentHashes, queueLength, clearQueue } = usePlacePixelWithSessionKey(
+  const { placePixel, pendingCount, recentHashes, queueLength, clearQueue, optimisticPixelsUsed, resetOptimisticCount } = usePlacePixelWithSessionKey(
     getSessionWalletClient,
     sessionAddress ?? undefined
   );
+
+  // Calculate optimistic pixels remaining (actual - optimistic used)
+  const optimisticPixelsRemaining = useMemo(() => {
+    const actual = Number(pixelsRemaining);
+    const optimistic = Math.max(0, actual - optimisticPixelsUsed);
+    return optimistic;
+  }, [pixelsRemaining, optimisticPixelsUsed]);
+
+  // Reset optimistic count when we get fresh cooldown data
+  useEffect(() => {
+    // When queue is empty and no pending transactions, reset optimistic count
+    // This means all transactions have settled (success or failure)
+    if (queueLength === 0 && pendingCount === 0 && optimisticPixelsUsed > 0) {
+      // Small delay to let the refetch complete
+      const timeout = setTimeout(() => {
+        resetOptimisticCount();
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [queueLength, pendingCount, optimisticPixelsUsed, resetOptimisticCount]);
   const { grantPremiumAccess, isPending: isPurchasingPremium } = useGrantPremiumAccess();
   const { recentPixels } = useWatchPixelPlaced(handlePixelPlaced);
 
@@ -270,15 +290,19 @@ export default function App() {
       const remaining = Number(cooldownRemaining);
       return Math.max(0, ((DEFAULT_COOLDOWN_SECONDS - remaining) / DEFAULT_COOLDOWN_SECONDS) * 100);
     }
-    // Not in cooldown - show pixels remaining
-    return (Number(pixelsRemaining) / DEFAULT_COOLDOWN_PIXELS) * 100;
-  }, [canPlace, cooldownRemaining, pixelsRemaining, hasAccess]);
+    // Not in cooldown - show optimistic pixels remaining
+    return (optimisticPixelsRemaining / DEFAULT_COOLDOWN_PIXELS) * 100;
+  }, [canPlace, cooldownRemaining, optimisticPixelsRemaining, hasAccess]);
 
   const cooldownDisplay = useMemo(() => {
     if (hasAccess) return '⚡';
     if (!canPlace) return `${Number(cooldownRemaining)}s`;
-    return `${Number(pixelsRemaining)}/${DEFAULT_COOLDOWN_PIXELS}`;
-  }, [canPlace, cooldownRemaining, pixelsRemaining, hasAccess]);
+    // Show queue indicator if we've optimistically used all pixels
+    if (optimisticPixelsRemaining === 0 && queueLength > 0) {
+      return `⏳ ${queueLength} queued`;
+    }
+    return `${optimisticPixelsRemaining}/${DEFAULT_COOLDOWN_PIXELS}`;
+  }, [canPlace, cooldownRemaining, optimisticPixelsRemaining, hasAccess, queueLength]);
 
   useEffect(() => {
     if (hasNavigatedRef.current) return;
@@ -326,9 +350,29 @@ export default function App() {
     }
   }, [cooldownRemaining, refetchCooldown]);
 
+  // Check if user can place a pixel (not in cooldown)
+  const canPlacePixel = useMemo(() => {
+    // Premium users bypass cooldown
+    if (hasAccess) return true;
+    // Check actual cooldown from contract
+    if (!canPlace) return false;
+    // Check optimistic cooldown (have we used all pixels?)
+    if (optimisticPixelsRemaining <= 0) return false;
+    return true;
+  }, [hasAccess, canPlace, optimisticPixelsRemaining]);
+
   // Fire and forget pixel placement - no waiting, allows spam clicking
   const handlePlacePixelAt = useCallback((px: number, py: number) => {
     if (!account.address || !canInstantPlace) return;
+
+    // Don't place if in cooldown (unless premium)
+    if (!canPlacePixel) {
+      toast.error('Cooldown active', {
+        description: 'Wait for cooldown to expire',
+        duration: 1500,
+      });
+      return;
+    }
 
     const isTransparent = selectedColor === TRANSPARENT_COLOR;
     // Transparent = 0 (unset), all other colors go through hexToUint32 (which converts black to 0x010101)
@@ -346,7 +390,7 @@ export default function App() {
     placePixel(px, py, color);
     // Refetch cooldown
     refetchCooldown();
-  }, [account.address, canInstantPlace, selectedColor, placePixel, updateMarker, removeMarker, addOptimisticPixel, sessionAddress, refetchCooldown]);
+  }, [account.address, canInstantPlace, canPlacePixel, selectedColor, placePixel, updateMarker, removeMarker, addOptimisticPixel, sessionAddress, refetchCooldown]);
 
   const handlePlacePixel = useCallback(() => {
     if (!selectedPixel) return;
@@ -360,21 +404,21 @@ export default function App() {
     // Check if we should instant place or just select
     const isZoomedIn = currentZoom >= PIXEL_SELECT_ZOOM;
 
-    if (isZoomedIn && canInstantPlace && canPlace) {
+    if (isZoomedIn && canInstantPlace && canPlacePixel) {
       // Instant place!
       handlePlacePixelAt(px, py);
     }
 
     // Always update selection (handleMapClick handles this)
     handleMapClick(lat, lng, selectedColor === TRANSPARENT_COLOR ? '#ffffff' : selectedColor);
-  }, [currentZoom, canInstantPlace, canPlace, handlePlacePixelAt, handleMapClick, selectedColor]);
+  }, [currentZoom, canInstantPlace, canPlacePixel, handlePlacePixelAt, handleMapClick, selectedColor]);
 
   // Keyboard shortcuts - fire and forget allows rapid pressing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      if (e.key === 'Enter' && selectedPixel && account.address && canInstantPlace) {
+      if (e.key === 'Enter' && selectedPixel && account.address && canInstantPlace && canPlacePixel) {
         e.preventDefault();
         handlePlacePixel();
       }
@@ -382,7 +426,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPixel, account.address, canInstantPlace, handlePlacePixel]);
+  }, [selectedPixel, account.address, canInstantPlace, canPlacePixel, handlePlacePixel]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
@@ -444,43 +488,27 @@ export default function App() {
         <button
           onClick={() => {
             if (allPixels.length > 0 && mapRef.current) {
-              // Get current visible bounds
               const bounds = mapRef.current.getBounds();
-              const center = mapRef.current.getCenter();
 
-              // Filter pixels that are NOT in the current view
-              const notVisiblePixels = allPixels.filter(pixel => {
+              // Filter placed pixels that are NOT in the current view
+              const pixelsOutsideView = allPixels.filter(pixel => {
                 const { lat, lon } = globalPxToLatLon(Number(pixel.x), Number(pixel.y));
                 return !bounds.contains([lat, lon]);
               });
 
-              // If we have pixels outside the view, prefer those
-              // Otherwise fall back to any pixel that's at least some distance away
-              let targetPixels = notVisiblePixels;
-
-              if (targetPixels.length === 0) {
-                // All pixels are visible - find ones that are at least somewhat away from center
-                const minDistance = 0.01; // Minimum lat/lon distance
-                targetPixels = allPixels.filter(pixel => {
-                  const { lat, lon } = globalPxToLatLon(Number(pixel.x), Number(pixel.y));
-                  const distance = Math.sqrt(
-                    Math.pow(lat - center.lat, 2) + Math.pow(lon - center.lng, 2)
-                  );
-                  return distance > minDistance;
-                });
-              }
-
-              // If still no candidates, just use all pixels
-              if (targetPixels.length === 0) {
-                targetPixels = allPixels;
-              }
-
+              // Pick from pixels outside view, or any pixel if all are visible
+              const targetPixels = pixelsOutsideView.length > 0 ? pixelsOutsideView : allPixels;
               const randomPixel = targetPixels[Math.floor(Math.random() * targetPixels.length)];
               focusOnPixel(Number(randomPixel.x), Number(randomPixel.y));
+            } else if (allPixels.length === 0) {
+              toast.info('No pixels placed yet', {
+                description: 'Be the first to place a pixel!',
+                duration: 2000,
+              });
             }
           }}
           className="w-8 h-8 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50 transition-colors"
-          title="Explore random pixel"
+          title="Explore placed pixels"
         >
           <CompassIcon />
         </button>

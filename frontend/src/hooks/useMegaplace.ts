@@ -168,6 +168,10 @@ export function usePlacePixelWithSessionKey(
   const [error, setError] = useState<Error | null>(null);
   const { refetch: refetchCooldown } = useCooldown(sessionAddress);
 
+  // Optimistic pixel tracking - how many pixels we've "used" optimistically
+  // This is decremented from the displayed pixelsRemaining
+  const [optimisticPixelsUsed, setOptimisticPixelsUsed] = useState(0);
+
   // Queue for retrying failed transactions
   const [queue, setQueue] = useState<Array<{ id: string; x: number; y: number; color: number; retryCount: number }>>([]);
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
@@ -233,9 +237,8 @@ export function usePlacePixelWithSessionKey(
             // Don't retry - needs user action
             console.warn(`[Queue] Insufficient funds, removing (${item.x}, ${item.y})`);
             setQueue(prev => prev.filter(i => i.id !== item.id));
-            toast.error('Session key needs funding', {
-              description: 'Fund your session key to place pixels',
-            });
+            // Revert optimistic pixel count since this pixel won't be placed
+            setOptimisticPixelsUsed(prev => Math.max(0, prev - 1));
             queueTimeoutRef.current = setTimeout(() => processQueueItem(), 50);
             return;
           }
@@ -244,6 +247,12 @@ export function usePlacePixelWithSessionKey(
           if (item.retryCount >= MAX_RETRIES) {
             console.warn(`[Queue] Max retries for (${item.x}, ${item.y})`);
             setQueue(prev => prev.filter(i => i.id !== item.id));
+            // Revert optimistic pixel count since this pixel won't be placed
+            setOptimisticPixelsUsed(prev => Math.max(0, prev - 1));
+            toast.error('Pixel failed to place', {
+              description: `(${item.x}, ${item.y}) - max retries reached`,
+              duration: 3000,
+            });
             queueTimeoutRef.current = setTimeout(() => processQueueItem(), 50);
             return;
           }
@@ -291,6 +300,8 @@ export function usePlacePixelWithSessionKey(
 
     setPendingCount(c => c + 1);
     setError(null);
+    // Optimistically increment pixels used
+    setOptimisticPixelsUsed(prev => prev + 1);
 
     try {
       const txHash = await sendTransaction(x, y, color);
@@ -309,11 +320,10 @@ export function usePlacePixelWithSessionKey(
       const isInsufficientFunds = errorMessage.includes('insufficient funds');
 
       if (isInsufficientFunds) {
-        toast.error('Session key needs funding', {
-          description: 'Fund your session key to place pixels',
-        });
+        // Revert optimistic count - this pixel won't be placed
+        setOptimisticPixelsUsed(prev => Math.max(0, prev - 1));
       } else if (isRateLimit) {
-        // Add to queue for retry
+        // Add to queue for retry - keep optimistic count (will be reverted if queue fails)
         const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         setQueue(prev => [...prev, { id, x, y, color, retryCount: 0 }]);
         toast.info('Pixel queued', {
@@ -321,7 +331,7 @@ export function usePlacePixelWithSessionKey(
           duration: 2000,
         });
       } else {
-        // Other errors - also queue for retry
+        // Other errors - also queue for retry - keep optimistic count
         const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         setQueue(prev => [...prev, { id, x, y, color, retryCount: 0 }]);
         console.warn('Pixel queued for retry:', err.message);
@@ -341,6 +351,11 @@ export function usePlacePixelWithSessionKey(
     setIsProcessingQueue(false);
   }, []);
 
+  // Reset optimistic count (call after refetch completes with fresh data)
+  const resetOptimisticCount = useCallback(() => {
+    setOptimisticPixelsUsed(0);
+  }, []);
+
   return {
     placePixel,
     pendingCount,
@@ -349,6 +364,9 @@ export function usePlacePixelWithSessionKey(
     queueLength: queue.length,
     isProcessingQueue,
     clearQueue,
+    // Optimistic pixel tracking
+    optimisticPixelsUsed,
+    resetOptimisticCount,
     // Keep old interface for compatibility
     hash: recentHashes[0],
     isPending: pendingCount > 0 || queue.length > 0,
