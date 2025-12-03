@@ -9,6 +9,8 @@ if (!alchemyWsUrl) {
   console.warn('VITE_ALCHEMY_WS_URL not set. Please add it to your .env file for WebSocket support.');
 }
 
+const rpcUrl = import.meta.env.VITE_RPC_URL;
+
 export const config = getDefaultConfig({
   appName: 'MegaPlace',
   projectId: 'deca5efd6ce631635e677fc6bb3d75ef',
@@ -26,13 +28,13 @@ export const config = getDefaultConfig({
             },
           }),
           // Fallback: HTTP
-          http('https://timothy.megaeth.com/rpc', {
+          http(rpcUrl, {
             batch: true,
           }),
         ]
         : [
           // If no Alchemy URL: HTTP only
-          http('https://timothy.megaeth.com/rpc', {
+          http(rpcUrl, {
             batch: true,
           }),
         ]

@@ -2,7 +2,7 @@ import 'dotenv/config'; // Must be first import to load env vars before other mo
 import { createApp } from './app.js';
 import { EventListener } from './eventListener.js';
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT!;
 
 async function main() {
     try {

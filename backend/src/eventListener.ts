@@ -4,15 +4,16 @@ import { existsSync } from 'fs';
 import path from 'path';
 import MegaplaceABI from './MegaplaceABI.json';
 
-const RPC_URL = process.env.RPC_URL || 'https://timothy.megaeth.com/rpc';
-const CONTRACT_ADDRESS = (process.env.CONTRACT_ADDRESS || '0xF7bB0ba31c14ff85c582f2b6F45355abe01dCB07') as `0x${string}`;
-const DEPLOYMENT_BLOCK = BigInt(process.env.DEPLOYMENT_BLOCK || '4211820');
-const DATA_DIR = process.env.DATA_DIR || './data';
+// All config from .env - no fallbacks
+const RPC_URL = process.env.RPC_URL!;
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS! as `0x${string}`;
+const DEPLOYMENT_BLOCK = BigInt(process.env.DEPLOYMENT_BLOCK!);
+const DATA_DIR = process.env.DATA_DIR!;
 
-// Sync configuration
-const CHUNK_SIZE = 2000n; // Blocks per chunk
-const PARALLEL_CHUNKS = 5; // Number of parallel chunk fetches
-const DELAY_BETWEEN_BATCHES = 200; // ms between parallel batch completions
+// Sync configuration from .env
+const CHUNK_SIZE = BigInt(process.env.CHUNK_SIZE!);
+const PARALLEL_CHUNKS = Number(process.env.PARALLEL_CHUNKS!);
+const DELAY_BETWEEN_BATCHES = Number(process.env.DELAY_BETWEEN_BATCHES!);
 
 // Save debounce configuration
 const SAVE_DEBOUNCE_MS = 5000; // 5 seconds

@@ -61,7 +61,7 @@ export function useSessionKey() {
         const walletClient = createWalletClient({
           account,
           chain: megaethChain,
-          transport: http('https://timothy.megaeth.com/rpc'),
+          transport: http(import.meta.env.VITE_RPC_URL),
         });
 
         sessionWalletClientRef.current = walletClient;
@@ -181,7 +181,7 @@ export function useSessionKey() {
     const walletClient = createWalletClient({
       account,
       chain: megaethChain,
-      transport: http('https://timothy.megaeth.com/rpc'),
+      transport: http(import.meta.env.VITE_RPC_URL),
     });
 
     sessionWalletClientRef.current = walletClient;
