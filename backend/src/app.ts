@@ -65,7 +65,7 @@ export function createApp(eventListener: EventListener) {
     });
 
     // ===== SSE: Server-Sent Events for real-time pixel updates =====
-    app.get('/api/pixels/stream', (req: Request, res: Response) => {
+    app.get('/pixels/stream', (req: Request, res: Response) => {
         // Set headers for SSE
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
@@ -100,7 +100,7 @@ export function createApp(eventListener: EventListener) {
     // ===== Binary format: Compact pixel data =====
     // Returns: [x (4 bytes), y (4 bytes), color (4 bytes)] per pixel = 12 bytes each
     // ~10x smaller than JSON for large datasets
-    app.get('/api/pixels/binary', (req: Request, res: Response) => {
+    app.get('/pixels/binary', (req: Request, res: Response) => {
         try {
             const buffer = eventListener.getPixelsBinary();
 
@@ -117,7 +117,7 @@ export function createApp(eventListener: EventListener) {
     });
 
     // ===== Get all pixels with optional pagination =====
-    app.get('/api/pixels', (req: Request, res: Response) => {
+    app.get('/pixels', (req: Request, res: Response) => {
         try {
             const { limit, offset } = req.query;
 
@@ -154,7 +154,7 @@ export function createApp(eventListener: EventListener) {
     });
 
     // Get pixel at specific coordinates
-    app.get('/api/pixels/:x/:y', (req: Request, res: Response) => {
+    app.get('/pixels/:x/:y', (req: Request, res: Response) => {
         try {
             const x = parseInt(req.params.x);
             const y = parseInt(req.params.y);
@@ -182,7 +182,7 @@ export function createApp(eventListener: EventListener) {
     });
 
     // Get pixels in a region
-    app.get('/api/pixels/region/:startX/:startY/:width/:height', (req: Request, res: Response) => {
+    app.get('/pixels/region/:startX/:startY/:width/:height', (req: Request, res: Response) => {
         try {
             const startX = parseInt(req.params.startX);
             const startY = parseInt(req.params.startY);
@@ -217,7 +217,7 @@ export function createApp(eventListener: EventListener) {
     });
 
     // Get stats
-    app.get('/api/stats', (req: Request, res: Response) => {
+    app.get('/stats', (req: Request, res: Response) => {
         try {
             const stats = eventListener.getStats();
 

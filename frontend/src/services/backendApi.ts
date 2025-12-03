@@ -60,7 +60,7 @@ export async function fetchAllPixelsBinary(): Promise<BackendPixelData[]> {
     }
 
     try {
-        const response = await fetch(`${BACKEND_URL}/api/pixels/binary`);
+        const response = await fetch(`${BACKEND_URL}/pixels/binary`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -95,7 +95,7 @@ export async function fetchAllPixelsBinary(): Promise<BackendPixelData[]> {
  */
 export async function fetchAllPixels(): Promise<BackendPixelData[]> {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/pixels`);
+        const response = await fetch(`${BACKEND_URL}/pixels`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -113,7 +113,7 @@ export async function fetchAllPixels(): Promise<BackendPixelData[]> {
  */
 export async function fetchPixel(x: number, y: number): Promise<BackendPixelData | null> {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/pixels/${x}/${y}`);
+        const response = await fetch(`${BACKEND_URL}/pixels/${x}/${y}`);
         if (!response.ok) {
             if (response.status === 404) return null;
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -137,7 +137,7 @@ export async function fetchRegion(
 ): Promise<BackendPixelData[]> {
     try {
         const response = await fetch(
-            `${BACKEND_URL}/api/pixels/region/${startX}/${startY}/${width}/${height}`
+            `${BACKEND_URL}/pixels/region/${startX}/${startY}/${width}/${height}`
         );
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -155,7 +155,7 @@ export async function fetchRegion(
  */
 export async function fetchStats(): Promise<StatsResponse | null> {
     try {
-        const response = await fetch(`${BACKEND_URL}/api/stats`);
+        const response = await fetch(`${BACKEND_URL}/stats`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -197,7 +197,7 @@ export function subscribeToPixelStream(
         return () => { };
     }
 
-    const eventSource = new EventSource(`${BACKEND_URL}/api/pixels/stream`);
+    const eventSource = new EventSource(`${BACKEND_URL}/pixels/stream`);
 
     eventSource.addEventListener('connected', () => {
         console.log('[SSE] Connected to pixel stream');

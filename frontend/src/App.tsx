@@ -700,8 +700,8 @@ export default function App() {
             {/* Paint Button with Cooldown */}
             <div className="px-4 pb-4">
               <button
-                onClick={handlePlacePixel}
-                disabled={!selectedPixel || !account.address || needsFunding}
+                onClick={needsFunding ? fundSessionKey : handlePlacePixel}
+                disabled={!account.address || (!needsFunding && !selectedPixel) || isFunding}
                 className="w-full relative overflow-hidden bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 text-white font-semibold py-3 px-6 rounded-xl transition-all disabled:cursor-not-allowed shadow-lg hover:shadow-xl active:scale-[0.99]"
               >
                 {/* Cooldown/Pixels progress bar */}
@@ -713,19 +713,27 @@ export default function App() {
                 )}
 
                 <div className="relative flex items-center justify-center gap-3">
-                  <PaintBrushIcon />
+                  {isFunding ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : needsFunding ? (
+                    <WalletIcon />
+                  ) : (
+                    <PaintBrushIcon />
+                  )}
                   <span>
                     {!account.address
                       ? 'Connect Wallet'
-                      : needsFunding
-                        ? 'Fund Session Key'
-                        : !selectedPixel
-                          ? 'Select a pixel'
-                          : pendingCount > 0
-                            ? `Painting (${pendingCount})...`
-                            : queueLength > 0
-                              ? `Paint (${queueLength} queued)`
-                              : 'Paint'
+                      : isFunding
+                        ? 'Funding...'
+                        : needsFunding
+                          ? 'Fund Session Key'
+                          : !selectedPixel
+                            ? 'Select a pixel'
+                            : pendingCount > 0
+                              ? `Painting (${pendingCount})...`
+                              : queueLength > 0
+                                ? `Paint (${queueLength} queued)`
+                                : 'Paint'
                     }
                   </span>
                   {account.address && selectedPixel && !needsFunding && (
