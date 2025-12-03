@@ -83,37 +83,40 @@ export function useSessionKey() {
     initSessionKey();
   }, []);
 
-  // Poll balance
-  useEffect(() => {
+  // Check balance function - can be called manually or on interval
+  const checkBalance = useCallback(async () => {
     if (!state.address || !publicClient) return;
 
-    const checkBalance = async () => {
-      try {
-        const balance = await publicClient.getBalance({ address: state.address! });
-        const minBalance = parseEther(SESSION_KEY_FUNDING_AMOUNT) / 2n; // Need at least half the funding amount
+    try {
+      const balance = await publicClient.getBalance({ address: state.address });
+      const minBalance = parseEther(SESSION_KEY_FUNDING_AMOUNT) / 2n; // Need at least half the funding amount
 
-        setState(prev => ({
-          ...prev,
-          balance,
-          needsFunding: balance < minBalance,
-        }));
-      } catch (error) {
-        console.error('[Session Key] Failed to check balance:', error);
-      }
-    };
+      setState(prev => ({
+        ...prev,
+        balance,
+        needsFunding: balance < minBalance,
+      }));
+    } catch (error) {
+      console.error('[Session Key] Failed to check balance:', error);
+    }
+  }, [state.address, publicClient]);
+
+  // Poll balance frequently
+  useEffect(() => {
+    if (!state.address || !publicClient) return;
 
     // Initial check
     checkBalance();
 
-    // Poll every 5 seconds
-    balancePollingRef.current = setInterval(checkBalance, 5000);
+    // Poll every 2 seconds for responsive balance updates
+    balancePollingRef.current = setInterval(checkBalance, 2000);
 
     return () => {
       if (balancePollingRef.current) {
         clearInterval(balancePollingRef.current);
       }
     };
-  }, [state.address, publicClient]);
+  }, [state.address, publicClient, checkBalance]);
 
   // Fund session key from main wallet
   const fundSessionKey = useCallback(async () => {
@@ -209,6 +212,7 @@ export function useSessionKey() {
     fundSessionKey,
     getSessionWalletClient,
     resetSessionKey,
+    refreshBalance: checkBalance,
   };
 }
 
