@@ -30,6 +30,18 @@ import {
   PIXEL_SELECT_ZOOM,
 } from './constants';
 import { latLonToGlobalPx, globalPxToLatLon } from './lib/projection';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+} from './components/ui/alert-dialog';
+
+// LocalStorage key for tracking if user has seen welcome dialog
+const HAS_SEEN_WELCOME_KEY = 'megaplace-has-seen-welcome';
 
 // Icons as inline SVGs for cleaner look
 const PaintBrushIcon = () => (
@@ -164,6 +176,51 @@ function saveMapView(center: [number, number], zoom: number) {
 }
 
 export default function App() {
+  // Check if user should see welcome dialog (first visit)
+  const [showWelcome, setShowWelcome] = useState(() => {
+    // If there are URL params for pixel location, skip welcome
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('px') || params.get('py')) {
+      return false;
+    }
+    // Check if user has previously seen welcome
+    const hasSeen = localStorage.getItem(HAS_SEEN_WELCOME_KEY);
+    return !hasSeen;
+  });
+
+  const handleDismissWelcome = useCallback(() => {
+    localStorage.setItem(HAS_SEEN_WELCOME_KEY, 'true');
+    setShowWelcome(false);
+  }, []);
+
+  return (
+    <>
+      <CanvasApp />
+      <AlertDialog open={showWelcome} onOpenChange={(open) => !open && handleDismissWelcome()}>
+        <AlertDialogContent className="max-w-md ">
+          <AlertDialogHeader className="text-center sm:text-center">
+            <img
+              src="/favicon.png"
+              alt="Megaplace"
+              className="w-48 h-auto mx-auto mb-2"
+            />
+            <AlertDialogTitle className="text-xl">Earth is your canvas</AlertDialogTitle>
+            <AlertDialogDescription className="text-base leading-relaxed">
+              A decentralized pixel canvas mapped to Earth. Place pixels anywhere on the planet with 10ms finality on MegaETH.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-center">
+            <AlertDialogAction onClick={handleDismissWelcome}>
+              Start Painting
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function CanvasApp() {
   const account = useAccount();
   const {
     mapRef,
@@ -472,7 +529,7 @@ export default function App() {
       </MapContainer>
 
       {/* Top Left - Zoom Controls */}
-      <div className="absolute top-4 left-4 flex flex-col gap-2 z-1000">
+      <div className="absolute top-4 left-4 flex flex-col gap-2 z-40">
         <button
           onClick={() => mapRef.current?.zoomIn()}
           className="w-8 h-8 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50 transition-colors font-bold text-lg"
@@ -515,7 +572,7 @@ export default function App() {
       </div>
 
       {/* Top Right - Wallet & Info */}
-      <div className="absolute top-4 right-4 flex items-center gap-3 z-1000">
+      <div className="absolute top-4 right-4 flex items-center gap-3 z-40">
         {/* Coordinates Display */}
         {hoveredPixel && (
           <div className="bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-lg shadow-lg text-sm font-mono text-slate-700">
@@ -603,7 +660,7 @@ export default function App() {
 
       {/* Transaction Status - Show pending count and queue for fire-and-forget */}
       {(pendingCount > 0 || queueLength > 0) && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-1000">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
           <div className="bg-white/95 backdrop-blur-sm px-4 py-2 rounded-xl shadow-lg text-sm font-medium text-slate-700 flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
             <span>
@@ -640,7 +697,7 @@ export default function App() {
 
       {/* Recent Pixels Panel */}
       {showRecentPixels && (
-        <div className="absolute top-16 right-4 w-72 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl z-1000 max-h-96 overflow-hidden">
+        <div className="absolute top-16 right-4 w-72 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl z-40 max-h-96 overflow-hidden">
           <div className="p-3 border-b border-slate-200 font-semibold text-slate-700 flex items-center justify-between">
             <span>Recent Pixels</span>
             <button onClick={() => setShowRecentPixels(false)} className="text-slate-400 hover:text-slate-600">✕</button>
@@ -687,7 +744,7 @@ export default function App() {
       )}
 
       {/* Bottom Toolbar */}
-      <div className="absolute bottom-0 left-0 right-0 z-1000 p-4">
+      <div className="absolute bottom-0 left-0 right-0 z-40 p-4">
         <div className="max-w-4xl mx-auto">
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
             {/* Toolbar Header */}
@@ -873,7 +930,7 @@ export default function App() {
         href="https://docs.megaeth.com/faucet#timothy"
         target="_blank"
         rel="noopener noreferrer"
-        className="absolute bottom-4 left-4 z-1000 text-white/60 hover:text-white/90 text-xs transition-colors"
+        className="absolute bottom-4 left-4 z-40 text-white/60 hover:text-white/90 text-xs transition-colors"
       >
         Get testnet ETH →
       </a>

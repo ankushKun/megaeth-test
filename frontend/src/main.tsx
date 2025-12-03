@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
-import { darkTheme, RainbowKitProvider } from '@rainbow-me/rainbowkit';
+import { lightTheme, RainbowKitProvider } from '@rainbow-me/rainbowkit';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { config } from './wagmi';
@@ -15,9 +15,9 @@ createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider theme={darkTheme()}>
+        <RainbowKitProvider theme={lightTheme()}>
           <App />
-          <Toaster position="top-center" theme="dark" />
+          <Toaster position="top-center" theme="light" />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
