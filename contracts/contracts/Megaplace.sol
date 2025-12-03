@@ -95,33 +95,30 @@ contract Megaplace is Ownable2Step {
         // Cache premium expiry (1 SLOAD instead of checking in conditional)
         uint64 userPremiumExpiry = premiumAccess[msg.sender];
 
-        // Rate limit for regular users: 5 seconds per 15 pixels
+        // Rate limit for regular users: after placing 15 pixels, wait 5 seconds
         if (currentTime > userPremiumExpiry) {
             uint64 lastCooldown = lastCooldownStart[msg.sender];
             uint64 pixelsPlaced = pixelsPlacedSinceCooldown[msg.sender];
 
-            // Check if cooldown has expired (reset counter)
-            if (currentTime >= lastCooldown + rateLimitSeconds) {
-                pixelsPlaced = 0;
-            }
-
-            // Check if user has hit the pixel limit
+            // Check if user is in cooldown (hit limit and cooldown not expired)
             if (pixelsPlaced >= rateLimitPixels) {
-                uint64 nextAvailable = lastCooldown + rateLimitSeconds;
-                if (currentTime < nextAvailable) {
-                    revert RateLimitExceeded(nextAvailable - currentTime);
+                if (currentTime < lastCooldown + rateLimitSeconds) {
+                    revert RateLimitExceeded(
+                        lastCooldown + rateLimitSeconds - currentTime
+                    );
                 }
-                // Cooldown expired, reset
+                // Cooldown expired, reset counter
                 pixelsPlaced = 0;
             }
 
-            // Update counter
+            // Increment counter
             unchecked {
-                pixelsPlacedSinceCooldown[msg.sender] = pixelsPlaced + 1;
+                pixelsPlaced++;
+                pixelsPlacedSinceCooldown[msg.sender] = pixelsPlaced;
             }
 
-            // Start cooldown timer when first pixel is placed in a new period
-            if (pixelsPlaced == 0) {
+            // Start cooldown timer when limit is reached
+            if (pixelsPlaced >= rateLimitPixels) {
                 lastCooldownStart[msg.sender] = currentTime;
             }
         }
@@ -132,13 +129,10 @@ contract Megaplace is Ownable2Step {
             index = px + py * CANVAS_RES;
         }
 
-        // If color is 0 (black), store as 0x010101 to distinguish from unplaced pixels
-        uint32 storedColor = color == 0 ? 0x010101 : color;
+        // Store pixel data (color 0 = unset/transparent, handled by frontend)
+        canvas[index] = Pixel(color, msg.sender, currentTime);
 
-        // Store pixel data
-        canvas[index] = Pixel(storedColor, msg.sender, currentTime);
-
-        emit PixelPlaced(msg.sender, px, py, storedColor, currentTime);
+        emit PixelPlaced(msg.sender, px, py, color, currentTime);
     }
 
     /**
@@ -163,44 +157,41 @@ contract Megaplace is Ownable2Step {
         uint64 currentTime = uint64(block.timestamp);
         uint64 userPremiumExpiry = premiumAccess[msg.sender];
 
-        // Rate limit for regular users: 5 seconds per 15 pixels
+        // Rate limit for regular users: after placing 15 pixels, wait 5 seconds
         if (currentTime > userPremiumExpiry) {
             uint64 lastCooldown = lastCooldownStart[msg.sender];
             uint64 pixelsPlaced = pixelsPlacedSinceCooldown[msg.sender];
 
-            // Check if cooldown has expired (reset counter)
-            if (currentTime >= lastCooldown + rateLimitSeconds) {
+            // Check if user is in cooldown (hit limit and cooldown not expired)
+            if (pixelsPlaced >= rateLimitPixels) {
+                if (currentTime < lastCooldown + rateLimitSeconds) {
+                    revert RateLimitExceeded(
+                        lastCooldown + rateLimitSeconds - currentTime
+                    );
+                }
+                // Cooldown expired, reset counter
                 pixelsPlaced = 0;
             }
 
             // Check if batch would exceed limit
             if (pixelsPlaced + uint64(length) > rateLimitPixels) {
-                // If already at limit, check cooldown
-                if (pixelsPlaced >= rateLimitPixels) {
-                    uint64 nextAvailable = lastCooldown + rateLimitSeconds;
-                    if (currentTime < nextAvailable) {
-                        revert RateLimitExceeded(nextAvailable - currentTime);
-                    }
-                    pixelsPlaced = 0;
-                } else {
-                    // Can place some but not all - revert with remaining capacity
-                    revert InvalidBatchSize(
-                        length,
-                        1,
-                        rateLimitPixels - pixelsPlaced
-                    );
-                }
+                // Can place some but not all - revert with remaining capacity
+                revert InvalidBatchSize(
+                    length,
+                    1,
+                    rateLimitPixels - pixelsPlaced
+                );
             }
 
             // Update counter
+            uint64 newPixelsPlaced;
             unchecked {
-                pixelsPlacedSinceCooldown[msg.sender] =
-                    pixelsPlaced +
-                    uint64(length);
+                newPixelsPlaced = pixelsPlaced + uint64(length);
+                pixelsPlacedSinceCooldown[msg.sender] = newPixelsPlaced;
             }
 
-            // Start cooldown timer when first pixel is placed in a new period
-            if (pixelsPlaced == 0) {
+            // Start cooldown timer when limit is reached
+            if (newPixelsPlaced >= rateLimitPixels) {
                 lastCooldownStart[msg.sender] = currentTime;
             }
         }
@@ -217,15 +208,13 @@ contract Megaplace is Ownable2Step {
                 i++;
             }
 
-            // If color is 0 (black), store as 0x010101 to distinguish from unplaced pixels
-            uint32 storedColor = colors[i - 1] == 0 ? 0x010101 : colors[i - 1];
-
-            canvas[index] = Pixel(storedColor, msg.sender, currentTime);
+            // Store pixel data (color 0 = unset/transparent, handled by frontend)
+            canvas[index] = Pixel(colors[i - 1], msg.sender, currentTime);
             emit PixelPlaced(
                 msg.sender,
                 px[i - 1],
                 py[i - 1],
-                storedColor,
+                colors[i - 1],
                 currentTime
             );
         }
@@ -520,18 +509,21 @@ contract Megaplace is Ownable2Step {
         uint64 lastCooldown = lastCooldownStart[user];
         uint64 pixelsPlaced = pixelsPlacedSinceCooldown[user];
 
-        // Check if cooldown has expired (reset counter)
-        if (currentTime >= lastCooldown + rateLimitSeconds) {
+        // Check if user is in cooldown (hit limit and cooldown not expired)
+        if (pixelsPlaced >= rateLimitPixels) {
+            if (currentTime < lastCooldown + rateLimitSeconds) {
+                // In cooldown - can't place
+                return (
+                    false,
+                    lastCooldown + rateLimitSeconds - currentTime,
+                    0
+                );
+            }
+            // Cooldown expired - can place, counter will reset
             return (true, 0, rateLimitPixels);
         }
 
-        // Check if user has hit the pixel limit
-        if (pixelsPlaced >= rateLimitPixels) {
-            uint64 nextAvailable = lastCooldown + rateLimitSeconds;
-            return (false, nextAvailable - currentTime, 0);
-        }
-
-        // User can still place pixels
+        // User can still place pixels (hasn't hit limit yet)
         return (true, 0, rateLimitPixels - pixelsPlaced);
     }
 

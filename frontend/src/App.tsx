@@ -18,6 +18,7 @@ import type { Map as LeafletMap } from 'leaflet';
 import { toast } from 'sonner';
 import {
   PRESET_COLORS,
+  TRANSPARENT_COLOR,
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
   MIN_MAP_ZOOM,
@@ -310,7 +311,7 @@ export default function App() {
 
   useEffect(() => {
     if (selectedPixel) {
-      updateSelectedHighlightColor(selectedColor);
+      updateSelectedHighlightColor(selectedColor === TRANSPARENT_COLOR ? '#ffffff' : selectedColor);
     }
   }, [selectedColor, selectedPixel, updateSelectedHighlightColor]);
 
@@ -327,16 +328,27 @@ export default function App() {
   const handlePlacePixelAt = useCallback((px: number, py: number) => {
     if (!account.address || !canInstantPlace) return;
 
-    const color = hexToUint32(selectedColor);
+    const isTransparent = selectedColor === TRANSPARENT_COLOR;
+    // Convert color: transparent = 0 (unset), black (#000000) = 0x010101, others as-is
+    let color = isTransparent ? 0 : hexToUint32(selectedColor);
+    // Frontend converts black (0) to near-black (0x010101) to distinguish from unset
+    if (color === 0 && !isTransparent) {
+      color = 0x010101;
+    }
+
     // Optimistic update - show immediately on map
-    updateMarker(px, py, color);
-    // Optimistic update - show immediately in Recent Pixels list
+    if (isTransparent) {
+      removeMarker(`${px},${py}`);
+    } else {
+      updateMarker(px, py, color);
+    }
+    // Optimistic update - show immediately in Recent Pixels list  
     addOptimisticPixel(px, py, color, sessionAddress || account.address);
     // Fire and forget - don't await
     placePixel(px, py, color);
     // Refetch cooldown
     refetchCooldown();
-  }, [account.address, canInstantPlace, selectedColor, placePixel, updateMarker, addOptimisticPixel, sessionAddress, refetchCooldown]);
+  }, [account.address, canInstantPlace, selectedColor, placePixel, updateMarker, removeMarker, addOptimisticPixel, sessionAddress, refetchCooldown]);
 
   const handlePlacePixel = useCallback(() => {
     if (!selectedPixel) return;
@@ -356,7 +368,7 @@ export default function App() {
     }
 
     // Always update selection (handleMapClick handles this)
-    handleMapClick(lat, lng, selectedColor);
+    handleMapClick(lat, lng, selectedColor === TRANSPARENT_COLOR ? '#ffffff' : selectedColor);
   }, [currentZoom, canInstantPlace, canPlace, handlePlacePixelAt, handleMapClick, selectedColor]);
 
   // Keyboard shortcuts - fire and forget allows rapid pressing
@@ -412,7 +424,7 @@ export default function App() {
               setCurrentZoom(mapRef.current.getZoom());
             }
           }}
-          onMouseMove={(lat, lng) => handleMapHover(lat, lng, selectedColor)}
+          onMouseMove={(lat, lng) => handleMapHover(lat, lng, selectedColor === TRANSPARENT_COLOR ? '#ffffff' : selectedColor)}
           onMouseOut={handleMapHoverOut}
         />
       </MapContainer>
@@ -671,28 +683,41 @@ export default function App() {
               <div className="p-4">
                 {/* Two rows of 19 colors each */}
                 <div className="grid grid-cols-19 gap-1.5 mb-4">
-                  {PRESET_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setSelectedColor(color)}
-                      className={`aspect-square ring ring-black/50 rounded-lg transition-all hover:scale-110 relative ${selectedColor === color
-                        ? 'ring-2 ring-offset-2 ring-blue-500 scale-110 z-10'
-                        : 'hover:ring-2 hover:ring-slate-300'
-                        }`}
-                      style={{ backgroundColor: color }}
-                      title={color}
-                    >
-                      {/* Selection checkmark */}
-                      {selectedColor === color && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className={`w-3 h-3 rounded-full ${['#FFFFFF', '#C0C0C0', '#FFF8B8', '#7EED56', '#51E9F4', '#94B3FF', '#E4ABFF', '#FF99AA', '#FFB470', '#D4D7D9', '#FFCC99'].includes(color)
-                            ? 'bg-slate-800'
-                            : 'bg-white'
-                            }`} />
-                        </div>
-                      )}
-                    </button>
-                  ))}
+                  {PRESET_COLORS.map((color) => {
+                    const isTransparent = color === TRANSPARENT_COLOR;
+                    return (
+                      <button
+                        key={color}
+                        onClick={() => setSelectedColor(color)}
+                        className={`aspect-square ring ring-black/50 rounded-lg transition-all hover:scale-110 relative ${selectedColor === color
+                          ? 'ring-2 ring-offset-2 ring-blue-500 scale-110 z-10'
+                          : 'hover:ring-2 hover:ring-slate-300'
+                          }`}
+                        style={isTransparent ? {
+                          backgroundImage: `
+                            linear-gradient(45deg, #ccc 25%, transparent 25%),
+                            linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                            linear-gradient(45deg, transparent 75%, #ccc 75%),
+                            linear-gradient(-45deg, transparent 75%, #ccc 75%)
+                          `,
+                          backgroundSize: '8px 8px',
+                          backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
+                          backgroundColor: '#fff'
+                        } : { backgroundColor: color }}
+                        title={isTransparent ? 'Erase (transparent)' : color}
+                      >
+                        {/* Selection checkmark */}
+                        {selectedColor === color && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className={`w-3 h-3 rounded-full ${isTransparent || ['#FFFFFF', '#C0C0C0', '#FFF8B8', '#7EED56', '#51E9F4', '#94B3FF', '#E4ABFF', '#FF99AA', '#FFB470', '#D4D7D9', '#FFCC99'].includes(color)
+                              ? 'bg-slate-800'
+                              : 'bg-white'
+                              }`} />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

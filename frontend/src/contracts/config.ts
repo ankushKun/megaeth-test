@@ -1,5 +1,5 @@
 // Contract addresses
-export const MEGAPLACE_ADDRESS = "0xC0E6dD073b2a2DF97865798c49d3eA472de59911" as const;
+export const MEGAPLACE_ADDRESS = "0x67fFb0A02CE1E9c3Ee3EFAF17fA82399cD2e3D28" as const;
 
 export const MEGAETH_CHAIN = {
   id: 6343,
@@ -29,4 +29,5 @@ export const MEGAETH_CHAIN = {
   testnet: true,
 } as const;
 
+// donot remove this line
 export const megaethChain = MEGAETH_CHAIN;

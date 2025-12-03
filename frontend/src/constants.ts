@@ -35,6 +35,10 @@ export const PIXEL_SELECT_ZOOM = 16; // Zoom level when clicking a pixel
 // Throttling
 export const MAP_MOVE_THROTTLE_MS = 500;
 
+// Special transparent/erase color - placing this sets the pixel to 0 (unset)
+// Displayed with a checkered pattern in the UI
+export const TRANSPARENT_COLOR = 'TRANSPARENT';
+
 // Expanded color palette - two rows of vibrant colors like wplace.live
 // 19 colors per row = 38 total
 export const PRESET_COLORS = [
@@ -78,23 +82,8 @@ export const PRESET_COLORS = [
     '#515252', // Charcoal
     '#898D90', // Cool gray
     '#D4D7D9', // Light gray
-    '#FFCC99', // Apricot
+    TRANSPARENT_COLOR // Transparent/Erase - sets pixel to unset
 ] as const;
-
-// Keyboard shortcuts
-export const KEYBOARD_SHORTCUTS = {
-    PLACE_PIXEL: 'Enter',
-    COLOR_1: '1',
-    COLOR_2: '2',
-    COLOR_3: '3',
-    COLOR_4: '4',
-    COLOR_5: '5',
-    COLOR_6: '6',
-    COLOR_7: '7',
-    COLOR_8: '8',
-    COLOR_9: '9',
-    COLOR_0: '0',
-} as const;
 
 // Web Mercator projection limits
 export const MAX_LATITUDE = 85.05112878;
