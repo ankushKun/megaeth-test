@@ -90,6 +90,13 @@ const WalletIcon = () => (
   </svg>
 );
 
+const CompassIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" />
+  </svg>
+);
+
 // Component to handle map events
 function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onZoomEnd, onMouseMove, onMouseOut }: {
   onMapClick: (lat: number, lng: number) => void;
@@ -124,6 +131,37 @@ function MapEventsHandler({ onMapClick, onMapReady, onMoveEnd, onZoomEnd, onMous
   return null;
 }
 
+// LocalStorage key for persisting map view
+const MAP_VIEW_STORAGE_KEY = 'megaplace-map-view';
+
+interface SavedMapView {
+  center: [number, number];
+  zoom: number;
+}
+
+function getSavedMapView(): SavedMapView | null {
+  try {
+    const saved = localStorage.getItem(MAP_VIEW_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.center && typeof parsed.zoom === 'number') {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    // Ignore parsing errors
+  }
+  return null;
+}
+
+function saveMapView(center: [number, number], zoom: number) {
+  try {
+    localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({ center, zoom }));
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
 export default function App() {
   const account = useAccount();
   const {
@@ -144,7 +182,13 @@ export default function App() {
     backendPixels,
     updateMarker,
     removeMarker,
+    addOptimisticPixel,
   } = useMap();
+
+  // Load saved map view from localStorage (only once on mount)
+  const savedMapView = useMemo(() => getSavedMapView(), []);
+  const initialCenter = savedMapView?.center ?? DEFAULT_MAP_CENTER;
+  const initialZoom = savedMapView?.zoom ?? DEFAULT_MAP_ZOOM;
 
   const lastMoveTimeRef = useRef<number>(0);
   const throttledLoadVisibleTiles = useCallback(() => {
@@ -153,6 +197,15 @@ export default function App() {
     lastMoveTimeRef.current = now;
     loadVisibleTiles();
   }, [loadVisibleTiles]);
+
+  // Save map view to localStorage when it changes
+  const saveCurrentMapView = useCallback(() => {
+    if (mapRef.current) {
+      const center = mapRef.current.getCenter();
+      const zoom = mapRef.current.getZoom();
+      saveMapView([center.lat, center.lng], zoom);
+    }
+  }, [mapRef]);
 
   // Session key for instant transactions
   const {
@@ -169,7 +222,7 @@ export default function App() {
   // Use session key for cooldown tracking
   const { canPlace, cooldownRemaining, pixelsRemaining, refetch: refetchCooldown } = useCooldown(sessionAddress ?? undefined);
   const { hasAccess } = usePremiumAccess();
-  const { placePixel, pendingCount, recentHashes } = usePlacePixelWithSessionKey(
+  const { placePixel, pendingCount, recentHashes, queueLength, clearQueue } = usePlacePixelWithSessionKey(
     getSessionWalletClient,
     sessionAddress ?? undefined
   );
@@ -180,7 +233,20 @@ export default function App() {
   const canInstantPlace = account.address && sessionAddress && !needsFunding;
 
   const allPixels = useMemo(() => {
-    return [...backendPixels, ...recentPixels]
+    // Merge and dedupe by position (x,y) - keep the one with latest timestamp
+    const pixelMap = new Map<string, typeof backendPixels[0]>();
+
+    for (const pixel of [...backendPixels, ...recentPixels]) {
+      const key = `${pixel.x},${pixel.y}`;
+      const existing = pixelMap.get(key);
+      // Keep pixel with latest timestamp, or if same timestamp keep the one with user address
+      if (!existing || Number(pixel.timestamp) > Number(existing.timestamp) ||
+        (Number(pixel.timestamp) === Number(existing.timestamp) && pixel.user && !existing.user)) {
+        pixelMap.set(key, pixel);
+      }
+    }
+
+    return Array.from(pixelMap.values())
       .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
   }, [backendPixels, recentPixels]);
 
@@ -217,6 +283,7 @@ export default function App() {
     const pxParam = params.get('px');
     const pyParam = params.get('py');
 
+    // URL params take priority - navigate to shared pixel location
     if (pxParam && pyParam) {
       const px = parseInt(pxParam, 10);
       const py = parseInt(pyParam, 10);
@@ -226,14 +293,20 @@ export default function App() {
           hasNavigatedRef.current = true;
         }, 500);
       }
-    } else if (allPixels.length > 0) {
+    }
+    // If we have a saved view, don't auto-navigate - user already has their preferred view
+    else if (savedMapView) {
+      hasNavigatedRef.current = true;
+    }
+    // No saved view and no URL params - navigate to a random recent pixel
+    else if (allPixels.length > 0) {
       const randomPixel = allPixels[Math.floor(Math.random() * allPixels.length)];
       setTimeout(() => {
         focusOnPixel(Number(randomPixel.x), Number(randomPixel.y));
         hasNavigatedRef.current = true;
       }, 500);
     }
-  }, [focusOnPixel, allPixels]);
+  }, [focusOnPixel, allPixels, savedMapView]);
 
   useEffect(() => {
     if (selectedPixel) {
@@ -255,13 +328,15 @@ export default function App() {
     if (!account.address || !canInstantPlace) return;
 
     const color = hexToUint32(selectedColor);
-    // Optimistic update - show immediately
+    // Optimistic update - show immediately on map
     updateMarker(px, py, color);
+    // Optimistic update - show immediately in Recent Pixels list
+    addOptimisticPixel(px, py, color, sessionAddress || account.address);
     // Fire and forget - don't await
     placePixel(px, py, color);
     // Refetch cooldown
     refetchCooldown();
-  }, [account.address, canInstantPlace, selectedColor, placePixel, updateMarker, refetchCooldown]);
+  }, [account.address, canInstantPlace, selectedColor, placePixel, updateMarker, addOptimisticPixel, sessionAddress, refetchCooldown]);
 
   const handlePlacePixel = useCallback(() => {
     if (!selectedPixel) return;
@@ -303,8 +378,8 @@ export default function App() {
     <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
       {/* Full-screen Map */}
       <MapContainer
-        center={DEFAULT_MAP_CENTER}
-        zoom={DEFAULT_MAP_ZOOM}
+        center={initialCenter}
+        zoom={initialZoom}
         minZoom={MIN_MAP_ZOOM}
         maxZoom={MAX_MAP_ZOOM}
         className="w-full h-full"
@@ -326,9 +401,13 @@ export default function App() {
             loadInitialTiles();
             setCurrentZoom(map.getZoom());
           }}
-          onMoveEnd={throttledLoadVisibleTiles}
+          onMoveEnd={() => {
+            throttledLoadVisibleTiles();
+            saveCurrentMapView();
+          }}
           onZoomEnd={() => {
             throttledLoadVisibleTiles();
+            saveCurrentMapView();
             if (mapRef.current) {
               setCurrentZoom(mapRef.current.getZoom());
             }
@@ -351,6 +430,18 @@ export default function App() {
           className="w-8 h-8 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50 transition-colors font-bold text-lg"
         >
           −
+        </button>
+        <button
+          onClick={() => {
+            if (allPixels.length > 0) {
+              const randomPixel = allPixels[Math.floor(Math.random() * allPixels.length)];
+              focusOnPixel(Number(randomPixel.x), Number(randomPixel.y));
+            }
+          }}
+          className="w-8 h-8 bg-white rounded-lg shadow-lg flex items-center justify-center text-slate-700 hover:bg-slate-50 transition-colors"
+          title="Explore random pixel"
+        >
+          <CompassIcon />
         </button>
       </div>
 
@@ -441,12 +532,29 @@ export default function App() {
         </ConnectButton.Custom>
       </div>
 
-      {/* Transaction Status - Show pending count for fire-and-forget */}
-      {pendingCount > 0 && (
+      {/* Transaction Status - Show pending count and queue for fire-and-forget */}
+      {(pendingCount > 0 || queueLength > 0) && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-1000">
           <div className="bg-white/95 backdrop-blur-sm px-4 py-2 rounded-xl shadow-lg text-sm font-medium text-slate-700 flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <span>Sending {pendingCount} tx{pendingCount > 1 ? 's' : ''}...</span>
+            <span>
+              {pendingCount > 0 && `Sending ${pendingCount} tx${pendingCount > 1 ? 's' : ''}`}
+              {pendingCount > 0 && queueLength > 0 && ' · '}
+              {queueLength > 0 && (
+                <span className="text-amber-600">
+                  {queueLength} queued (retrying)
+                </span>
+              )}
+            </span>
+            {queueLength > 0 && (
+              <button
+                onClick={clearQueue}
+                className="text-slate-400 hover:text-red-500 text-xs ml-1"
+                title="Clear queue"
+              >
+                ✕
+              </button>
+            )}
             {recentHashes[0] && (
               <a
                 href={`https://megaexplorer.xyz/tx/${recentHashes[0]}`}
@@ -475,7 +583,6 @@ export default function App() {
                 className="p-3 hover:bg-slate-50 cursor-pointer transition-colors flex items-center gap-3 border-b border-slate-100 last:border-0"
                 onClick={() => {
                   focusOnPixel(Number(pixel.x), Number(pixel.y));
-                  setShowRecentPixels(false);
                 }}
               >
                 <div
@@ -616,7 +723,9 @@ export default function App() {
                           ? 'Select a pixel'
                           : pendingCount > 0
                             ? `Painting (${pendingCount})...`
-                            : 'Paint'
+                            : queueLength > 0
+                              ? `Paint (${queueLength} queued)`
+                              : 'Paint'
                     }
                   </span>
                   {account.address && selectedPixel && !needsFunding && (

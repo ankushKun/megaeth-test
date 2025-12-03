@@ -99,9 +99,8 @@ export const KEYBOARD_SHORTCUTS = {
 // Web Mercator projection limits
 export const MAX_LATITUDE = 85.05112878;
 
-// API configuration
-export const DEFAULT_BACKEND_URL = 'http://localhost:3001';
-export const BACKEND_HEALTH_TIMEOUT_MS = 3000;
-
 // Transaction timeouts
 export const TX_CONFIRMATION_TIMEOUT_MS = 60000;
+
+// Note: Backend URL configuration moved to src/config/env.ts
+// Use: import { config } from './config/env' for backend URL

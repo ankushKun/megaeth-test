@@ -9,6 +9,11 @@ const CONTRACT_ADDRESS = (process.env.CONTRACT_ADDRESS || '0xF7bB0ba31c14ff85c58
 const DEPLOYMENT_BLOCK = BigInt(process.env.DEPLOYMENT_BLOCK || '4211820');
 const DATA_DIR = process.env.DATA_DIR || './data';
 
+// Sync configuration
+const CHUNK_SIZE = 2000n; // Blocks per chunk
+const PARALLEL_CHUNKS = 5; // Number of parallel chunk fetches
+const DELAY_BETWEEN_BATCHES = 200; // ms between parallel batch completions
+
 // Save debounce configuration
 const SAVE_DEBOUNCE_MS = 5000; // 5 seconds
 const SAVE_MAX_WAIT_MS = 30000; // 30 seconds max wait
@@ -50,17 +55,25 @@ export interface PixelStorage {
     totalPixels: number;
 }
 
+// Callback type for new pixel events
+export type PixelCallback = (pixel: PixelData) => void;
+
 export class EventListener {
     private client: ReturnType<typeof createPublicClient>;
     private storage: PixelStorage;
     private storageFile: string;
     private isRunning = false;
     private unwatch?: () => void;
+    private isSyncing = false;
+    private syncProgress = 0;
 
     // Debounced save state
     private saveTimeout: NodeJS.Timeout | null = null;
     private lastSaveTime: number = 0;
     private pendingSave: boolean = false;
+
+    // Callbacks for real-time updates (SSE)
+    private pixelCallbacks: Set<PixelCallback> = new Set();
 
     constructor() {
         // Determine if we should use WebSocket or HTTP based on URL
@@ -101,6 +114,27 @@ export class EventListener {
         };
 
         console.log(`🔗 Using ${isWebSocket ? 'WebSocket' : 'HTTP'} transport: ${RPC_URL}`);
+    }
+
+    /**
+     * Register a callback for new pixel events (for SSE)
+     */
+    public onPixel(callback: PixelCallback): () => void {
+        this.pixelCallbacks.add(callback);
+        return () => this.pixelCallbacks.delete(callback);
+    }
+
+    /**
+     * Notify all registered callbacks of a new pixel
+     */
+    private notifyPixel(pixel: PixelData): void {
+        for (const callback of this.pixelCallbacks) {
+            try {
+                callback(pixel);
+            } catch (err) {
+                console.error('Error in pixel callback:', err);
+            }
+        }
     }
 
     /**
@@ -151,25 +185,20 @@ export class EventListener {
 
     /**
      * Save pixel data with debouncing
-     * - Waits SAVE_DEBOUNCE_MS after last change
-     * - But never waits more than SAVE_MAX_WAIT_MS
      */
     private saveStorage(): void {
         this.pendingSave = true;
         const timeSinceLastSave = Date.now() - this.lastSaveTime;
 
-        // Clear any existing timeout
         if (this.saveTimeout) {
             clearTimeout(this.saveTimeout);
         }
 
-        // If we've been waiting too long, save immediately
         if (timeSinceLastSave >= SAVE_MAX_WAIT_MS) {
             this.saveStorageImmediate();
             return;
         }
 
-        // Calculate how long we can still wait
         const maxDelay = Math.min(SAVE_DEBOUNCE_MS, SAVE_MAX_WAIT_MS - timeSinceLastSave);
 
         this.saveTimeout = setTimeout(() => {
@@ -187,9 +216,9 @@ export class EventListener {
     /**
      * Process a batch of historical events with retry logic
      */
-    private async processHistoricalEvents(fromBlock: bigint, toBlock: bigint, retryCount = 0): Promise<void> {
+    private async processHistoricalEvents(fromBlock: bigint, toBlock: bigint, retryCount = 0): Promise<PixelData[]> {
         const MAX_RETRIES = 5;
-        const BASE_DELAY = 3000; // 3 seconds
+        const BASE_DELAY = 3000;
 
         try {
             const logs = await this.client.getLogs({
@@ -198,6 +227,8 @@ export class EventListener {
                 fromBlock,
                 toBlock,
             });
+
+            const pixels: PixelData[] = [];
 
             if (logs.length > 0) {
                 for (const log of logs) {
@@ -212,27 +243,26 @@ export class EventListener {
                             timestamp: Number(args.timestamp),
                         };
 
-                        // Update or add pixel
                         if (!this.storage.pixels[key]) {
                             this.storage.totalPixels++;
                         }
                         this.storage.pixels[key] = pixelData;
+                        pixels.push(pixelData);
                     }
                 }
             }
 
-            this.storage.lastProcessedBlock = toBlock;
+            return pixels;
         } catch (error: any) {
-            // Check if it's a rate limit error
             if (error?.code === -32022 || error?.message?.includes('compute unit limit') || error?.message?.includes('rate limit')) {
                 if (retryCount < MAX_RETRIES) {
-                    const delay = BASE_DELAY * Math.pow(2, retryCount); // Exponential backoff
+                    const delay = BASE_DELAY * Math.pow(2, retryCount);
                     console.log(`⏳ Rate limited, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
                     await this.sleep(delay);
                     return this.processHistoricalEvents(fromBlock, toBlock, retryCount + 1);
                 } else {
                     console.warn(`⚠️ Max retries reached for blocks ${fromBlock}-${toBlock}, skipping`);
-                    return;
+                    return [];
                 }
             }
             console.error('Error processing events:', error);
@@ -241,10 +271,34 @@ export class EventListener {
     }
 
     /**
+     * Process multiple chunk ranges in parallel
+     */
+    private async processChunksParallel(chunks: Array<{ from: bigint; to: bigint }>): Promise<void> {
+        const results = await Promise.allSettled(
+            chunks.map(chunk => this.processHistoricalEvents(chunk.from, chunk.to))
+        );
+
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                console.error('Chunk processing failed:', result.reason);
+            }
+        }
+
+        // Update last processed block to the highest processed
+        const maxBlock = chunks.reduce((max, chunk) => chunk.to > max ? chunk.to : max, 0n);
+        if (maxBlock > this.storage.lastProcessedBlock) {
+            this.storage.lastProcessedBlock = maxBlock;
+        }
+    }
+
+    /**
      * Sync all historical events from deployment to current block
+     * Uses parallel processing for faster sync
      */
     public async syncHistoricalEvents(): Promise<void> {
         console.log('📡 Syncing historical events...');
+        this.isSyncing = true;
+        this.syncProgress = 0;
 
         try {
             const currentBlock = await this.client.getBlockNumber();
@@ -252,44 +306,56 @@ export class EventListener {
 
             if (startBlock > currentBlock) {
                 console.log('✓ Already synced to latest block');
+                this.isSyncing = false;
+                this.syncProgress = 100;
                 return;
             }
 
             const totalBlocks = currentBlock - startBlock + 1n;
             console.log(`  Blocks to process: ${totalBlocks} (${startBlock} → ${currentBlock})`);
+            console.log(`  Using ${PARALLEL_CHUNKS} parallel workers with ${CHUNK_SIZE} blocks per chunk`);
 
-            // Process in smaller chunks to avoid RPC rate limits
-            const CHUNK_SIZE = 1000n;
-            const DELAY_BETWEEN_CHUNKS = 500;
             let fromBlock = startBlock;
-            let processedChunks = 0;
+            let processedBlocks = 0n;
 
             while (fromBlock <= currentBlock) {
-                const toBlock = fromBlock + CHUNK_SIZE > currentBlock ? currentBlock : fromBlock + CHUNK_SIZE;
+                // Build array of chunks to process in parallel
+                const chunks: Array<{ from: bigint; to: bigint }> = [];
 
-                await this.processHistoricalEvents(fromBlock, toBlock);
-
-                // Use debounced save during sync
-                this.saveStorage();
-
-                processedChunks++;
-                const progress = ((Number(toBlock - startBlock) / Number(totalBlocks)) * 100).toFixed(1);
-
-                if (processedChunks % 10 === 0) {
-                    console.log(`  Progress: ${progress}% (block ${toBlock})`);
+                for (let i = 0; i < PARALLEL_CHUNKS && fromBlock <= currentBlock; i++) {
+                    const toBlock = fromBlock + CHUNK_SIZE > currentBlock ? currentBlock : fromBlock + CHUNK_SIZE - 1n;
+                    chunks.push({ from: fromBlock, to: toBlock });
+                    fromBlock = toBlock + 1n;
                 }
 
-                fromBlock = toBlock + 1n;
+                // Process chunks in parallel
+                await this.processChunksParallel(chunks);
 
+                // Update progress
+                processedBlocks = this.storage.lastProcessedBlock - startBlock + 1n;
+                this.syncProgress = Math.min(100, Math.round((Number(processedBlocks) / Number(totalBlocks)) * 100));
+
+                // Debounced save
+                this.saveStorage();
+
+                // Log progress periodically
+                if (this.syncProgress % 10 === 0 || this.syncProgress === 100) {
+                    console.log(`  Progress: ${this.syncProgress}% (block ${this.storage.lastProcessedBlock}, ${this.storage.totalPixels} pixels)`);
+                }
+
+                // Small delay between batches to avoid overwhelming RPC
                 if (fromBlock <= currentBlock) {
-                    await this.sleep(DELAY_BETWEEN_CHUNKS);
+                    await this.sleep(DELAY_BETWEEN_BATCHES);
                 }
             }
 
             // Final save after sync
             await this.saveStorageImmediate();
+            this.isSyncing = false;
+            this.syncProgress = 100;
             console.log(`✓ Sync complete. Total pixels: ${this.storage.totalPixels}`);
         } catch (error) {
+            this.isSyncing = false;
             console.error('✗ Historical sync failed:', error);
             throw error;
         }
@@ -306,7 +372,6 @@ export class EventListener {
         console.log('👀 Starting real-time event listener...');
         this.isRunning = true;
 
-        // Watch for new PixelPlaced events
         this.unwatch = this.client.watchContractEvent({
             address: CONTRACT_ADDRESS,
             abi: MegaplaceABI,
@@ -333,7 +398,9 @@ export class EventListener {
 
                         console.log(`🎨 Pixel at (${args.x}, ${args.y}) by ${(args.user as string).slice(0, 8)}...`);
 
-                        // Use debounced save for real-time events
+                        // Notify SSE clients
+                        this.notifyPixel(pixelData);
+
                         this.saveStorage();
                     }
                 }
@@ -361,12 +428,10 @@ export class EventListener {
             this.unwatch();
             this.isRunning = false;
 
-            // Clear any pending save timeout
             if (this.saveTimeout) {
                 clearTimeout(this.saveTimeout);
             }
 
-            // Final save on shutdown
             if (this.pendingSave) {
                 this.saveStorageImmediate();
             }
@@ -380,7 +445,7 @@ export class EventListener {
      */
     public async initialize(): Promise<void> {
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('     Megaplace Event Listener v1.1');
+        console.log('     Megaplace Event Listener v1.2');
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         console.log(`📋 Contract: ${CONTRACT_ADDRESS}`);
         console.log(`🌐 RPC: ${RPC_URL}\n`);
@@ -398,11 +463,45 @@ export class EventListener {
     }
 
     /**
+     * Get pixels as array (sorted by timestamp, newest first)
+     */
+    public getPixelsArray(limit?: number, offset?: number): PixelData[] {
+        const pixelsArray = Object.values(this.storage.pixels)
+            .sort((a, b) => b.timestamp - a.timestamp);
+
+        if (limit !== undefined && offset !== undefined) {
+            return pixelsArray.slice(offset, offset + limit);
+        }
+        if (limit !== undefined) {
+            return pixelsArray.slice(0, limit);
+        }
+        return pixelsArray;
+    }
+
+    /**
      * Get pixel at specific coordinates
      */
     public getPixel(x: number, y: number): PixelData | null {
         const key = `${x},${y}`;
         return this.storage.pixels[key] || null;
+    }
+
+    /**
+     * Get pixels in a region
+     */
+    public getRegion(startX: number, startY: number, width: number, height: number): PixelData[] {
+        const pixels: PixelData[] = [];
+
+        for (let y = startY; y < startY + height; y++) {
+            for (let x = startX; x < startX + width; x++) {
+                const key = `${x},${y}`;
+                if (this.storage.pixels[key]) {
+                    pixels.push(this.storage.pixels[key]);
+                }
+            }
+        }
+
+        return pixels;
     }
 
     /**
@@ -413,6 +512,29 @@ export class EventListener {
             totalPixels: this.storage.totalPixels,
             lastProcessedBlock: this.storage.lastProcessedBlock.toString(),
             isWatching: this.isRunning,
+            isSyncing: this.isSyncing,
+            syncProgress: this.syncProgress,
+            connectedClients: this.pixelCallbacks.size,
         };
+    }
+
+    /**
+     * Get pixels as compact binary buffer
+     * Format: [x (4 bytes), y (4 bytes), color (4 bytes)] per pixel = 12 bytes each
+     * Much more efficient than JSON for large datasets
+     */
+    public getPixelsBinary(): Buffer {
+        const pixels = Object.values(this.storage.pixels);
+        const buffer = Buffer.alloc(pixels.length * 12);
+
+        let offset = 0;
+        for (const pixel of pixels) {
+            buffer.writeUInt32LE(pixel.x, offset);
+            buffer.writeUInt32LE(pixel.y, offset + 4);
+            buffer.writeUInt32LE(pixel.color, offset + 8);
+            offset += 12;
+        }
+
+        return buffer;
     }
 }

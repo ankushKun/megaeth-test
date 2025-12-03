@@ -1,9 +1,6 @@
-import dotenv from 'dotenv';
+import 'dotenv/config'; // Must be first import to load env vars before other modules
 import { createApp } from './app.js';
 import { EventListener } from './eventListener.js';
-
-// Load environment variables
-dotenv.config();
 
 const PORT = process.env.PORT || 3001;
 
@@ -21,11 +18,14 @@ async function main() {
             console.log(`  📍 http://localhost:${PORT}`);
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
             console.log('Endpoints:');
-            console.log(`  GET  /health`);
-            console.log(`  GET  /api/stats`);
-            console.log(`  GET  /api/pixels`);
-            console.log(`  GET  /api/pixels/:x/:y`);
-            console.log(`  GET  /api/pixels/region/:startX/:startY/:width/:height`);
+            console.log(`  GET  /health                    - Health check & stats`);
+            console.log(`  GET  /api/stats                 - Sync stats`);
+            console.log(`  GET  /api/pixels                - All pixels (JSON, paginated)`);
+            console.log(`  GET  /api/pixels?limit=N&offset=M`);
+            console.log(`  GET  /api/pixels/binary         - All pixels (binary, 12 bytes/pixel)`);
+            console.log(`  GET  /api/pixels/stream         - SSE real-time pixel updates`);
+            console.log(`  GET  /api/pixels/:x/:y          - Single pixel`);
+            console.log(`  GET  /api/pixels/region/...     - Region of pixels`);
             console.log();
         });
 

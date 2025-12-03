@@ -3,7 +3,13 @@ import { uint32ToRgb, type PixelPlacedEvent } from './useMegaplace';
 import type { Map as LeafletMap } from 'leaflet';
 import * as L from 'leaflet';
 import { latLonToGlobalPx, globalPxToLatLon } from '../lib/projection';
-import { fetchAllPixels, checkBackendHealth } from '../services/backendApi';
+import {
+    fetchAllPixelsBinary,
+    fetchAllPixels,
+    checkBackendHealth,
+    subscribeToPixelStream,
+    type BackendPixelData
+} from '../services/backendApi';
 import { PIXEL_SELECT_ZOOM } from '../constants';
 
 interface UseMapState {
@@ -20,67 +26,15 @@ export function useMap() {
     const [placedPixelCount, setPlacedPixelCount] = useState(0);
     const [isLoadingFromBackend, setIsLoadingFromBackend] = useState(true);
     const [backendPixels, setBackendPixels] = useState<PixelPlacedEvent[]>([]);
+    const [isSSEConnected, setIsSSEConnected] = useState(false);
     const hasLoadedFromBackendRef = useRef(false);
     const mapReadyRef = useRef(false);
 
     // Store pixel colors in a map for efficient updates
-    // Key: "px,py", Value: color
     const pixelDataRef = useRef<Map<string, number>>(new Map());
     const markersRef = useRef<Map<string, L.Rectangle | L.CircleMarker>>(new Map());
     const hoverHighlightRef = useRef<L.Rectangle | null>(null);
     const selectedHighlightRef = useRef<L.Rectangle | null>(null);
-
-    // Load initial data from backend on mount
-    useEffect(() => {
-        const loadFromBackend = async () => {
-            if (hasLoadedFromBackendRef.current) return;
-
-            const isBackendAvailable = await checkBackendHealth();
-
-            if (!isBackendAvailable) {
-                setIsLoadingFromBackend(false);
-                return;
-            }
-
-            hasLoadedFromBackendRef.current = true;
-
-            try {
-                const pixels = await fetchAllPixels();
-
-                // Convert to PixelPlacedEvent format for the UI list
-                const pixelEvents: PixelPlacedEvent[] = pixels.map(pixel => ({
-                    user: pixel.placedBy,
-                    x: BigInt(pixel.x),
-                    y: BigInt(pixel.y),
-                    color: pixel.color,
-                    timestamp: BigInt(pixel.timestamp),
-                }));
-                setBackendPixels(pixelEvents);
-
-                // Populate pixel data
-                for (const pixel of pixels) {
-                    const pixelKey = `${pixel.x},${pixel.y}`;
-                    pixelDataRef.current.set(pixelKey, pixel.color);
-                }
-
-                setPlacedPixelCount(pixels.length);
-
-                // If map is already ready, create markers now
-                if (mapReadyRef.current && mapRef.current) {
-                    for (const [key, color] of pixelDataRef.current.entries()) {
-                        const [px, py] = key.split(',').map(Number);
-                        updateMarkerInternal(px, py, color);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to load from backend:', error);
-            } finally {
-                setIsLoadingFromBackend(false);
-            }
-        };
-
-        loadFromBackend();
-    }, []);
 
     // Internal marker update function
     const updateMarkerInternal = useCallback((px: number, py: number, color: number) => {
@@ -92,10 +46,8 @@ export function useMap() {
 
         let marker = markersRef.current.get(pixelKey);
         if (marker) {
-            // Update existing marker
             marker.setStyle({ fillColor: hexColor, color: hexColor });
         } else {
-            // Create new marker
             const { lat: lat1, lon: lon1 } = globalPxToLatLon(px, py);
             const { lat: lat2, lon: lon2 } = globalPxToLatLon(px + 1, py + 1);
 
@@ -141,12 +93,119 @@ export function useMap() {
         pixelDataRef.current.delete(pixelKey);
     }, []);
 
+    // Handle SSE pixel event
+    const handleSSEPixel = useCallback((pixel: BackendPixelData) => {
+        const pixelKey = `${pixel.x},${pixel.y}`;
+
+        if (pixel.color === 0) {
+            pixelDataRef.current.delete(pixelKey);
+            removeMarker(pixelKey);
+        } else {
+            pixelDataRef.current.set(pixelKey, pixel.color);
+            updateMarkerInternal(pixel.x, pixel.y, pixel.color);
+        }
+
+        // Update recent pixels list for UI (filter out existing pixel at same position)
+        const pixelEvent: PixelPlacedEvent = {
+            user: pixel.placedBy,
+            x: BigInt(pixel.x),
+            y: BigInt(pixel.y),
+            color: pixel.color,
+            timestamp: BigInt(pixel.timestamp),
+        };
+
+        setBackendPixels(prev => {
+            const filtered = prev.filter(p => !(Number(p.x) === pixel.x && Number(p.y) === pixel.y));
+            return [pixelEvent, ...filtered].slice(0, 50);
+        });
+        setPlacedPixelCount(pixelDataRef.current.size);
+
+        console.log(`[SSE] New pixel at (${pixel.x}, ${pixel.y})`);
+    }, [updateMarkerInternal, removeMarker]);
+
+    // Load initial data from backend on mount
+    useEffect(() => {
+        let unsubscribeSSE: (() => void) | null = null;
+
+        const loadFromBackend = async () => {
+            if (hasLoadedFromBackendRef.current) return;
+
+            const isBackendAvailable = await checkBackendHealth();
+
+            if (!isBackendAvailable) {
+                setIsLoadingFromBackend(false);
+                return;
+            }
+
+            hasLoadedFromBackendRef.current = true;
+
+            try {
+                // Fetch both formats in parallel:
+                // - Binary for efficient marker rendering (no metadata)
+                // - JSON for recent pixels list (has placedBy, timestamp)
+                const [binaryPixels, jsonPixels] = await Promise.all([
+                    fetchAllPixelsBinary(),
+                    fetchAllPixels(),
+                ]);
+
+                // Use JSON data for the UI list (has full metadata including placedBy)
+                const pixelEvents: PixelPlacedEvent[] = jsonPixels
+                    .slice(0, 50)
+                    .map(pixel => ({
+                        user: pixel.placedBy,
+                        x: BigInt(pixel.x),
+                        y: BigInt(pixel.y),
+                        color: pixel.color,
+                        timestamp: BigInt(pixel.timestamp),
+                    }));
+                setBackendPixels(pixelEvents);
+
+                // Use binary data for populating markers (more complete set, faster to parse)
+                const pixels = binaryPixels.length > 0 ? binaryPixels : jsonPixels;
+                for (const pixel of pixels) {
+                    const pixelKey = `${pixel.x},${pixel.y}`;
+                    pixelDataRef.current.set(pixelKey, pixel.color);
+                }
+
+                setPlacedPixelCount(pixels.length);
+
+                // If map is already ready, create markers now
+                if (mapReadyRef.current && mapRef.current) {
+                    for (const [key, color] of pixelDataRef.current.entries()) {
+                        const [px, py] = key.split(',').map(Number);
+                        updateMarkerInternal(px, py, color);
+                    }
+                }
+
+                console.log(`✓ Loaded ${pixels.length} pixels from backend`);
+            } catch (error) {
+                console.error('Failed to load from backend:', error);
+            } finally {
+                setIsLoadingFromBackend(false);
+            }
+
+            // Subscribe to SSE for real-time updates (after initial load)
+            unsubscribeSSE = subscribeToPixelStream(
+                handleSSEPixel,
+                () => setIsSSEConnected(true),
+                () => setIsSSEConnected(false)
+            );
+        };
+
+        loadFromBackend();
+
+        return () => {
+            if (unsubscribeSSE) {
+                unsubscribeSSE();
+            }
+        };
+    }, [handleSSEPixel, updateMarkerInternal]);
+
     // Initialize map and create markers for pre-loaded pixels
     const initializeMap = useCallback((map: LeafletMap) => {
         mapRef.current = map;
         mapReadyRef.current = true;
 
-        // Create markers for all loaded pixels
         if (pixelDataRef.current.size > 0) {
             for (const [key, color] of pixelDataRef.current.entries()) {
                 const [px, py] = key.split(',').map(Number);
@@ -155,7 +214,7 @@ export function useMap() {
         }
     }, [updateMarkerInternal]);
 
-    // Handle pixel placed event from contract
+    // Handle pixel placed event from contract (for optimistic updates)
     const handlePixelPlaced = useCallback(
         (event: PixelPlacedEvent) => {
             const px = Number(event.x);
@@ -218,6 +277,7 @@ export function useMap() {
     }, []);
 
     // Focus on a specific pixel with smooth animation
+    // Offsets the view upward to account for the bottom panel
     const focusOnPixel = useCallback((px: number, py: number, zoom?: number) => {
         if (!mapRef.current) return;
 
@@ -225,19 +285,23 @@ export function useMap() {
         const currentZoom = mapRef.current.getZoom();
         const targetZoom = zoom !== undefined ? zoom : (currentZoom < PIXEL_SELECT_ZOOM ? PIXEL_SELECT_ZOOM : currentZoom);
 
-        // Hide existing highlight during animation
         if (selectedHighlightRef.current) {
             mapRef.current.removeLayer(selectedHighlightRef.current);
             selectedHighlightRef.current = null;
         }
 
-        // Use flyTo for smooth animated transition
-        mapRef.current.flyTo([lat, lon], targetZoom, {
+        // Calculate offset to account for bottom panel (~200px)
+        // At zoom level Z, 1 pixel on screen = 360 / (256 * 2^Z) degrees of latitude
+        // We want to shift the map center down so the pixel appears higher in viewport
+        const bottomPanelOffset = 90; // pixels
+        const degreesPerPixel = 360 / (256 * Math.pow(2, targetZoom));
+        const latOffset = bottomPanelOffset * degreesPerPixel;
+
+        mapRef.current.flyTo([lat - latOffset, lon], targetZoom, {
             duration: 1.2,
             easeLinearity: 0.25,
         });
 
-        // Show highlight after animation completes
         const onMoveEnd = () => {
             showSelectionHighlight(px, py);
             mapRef.current?.off('moveend', onMoveEnd);
@@ -308,26 +372,28 @@ export function useMap() {
         const needsZoom = currentZoom < PIXEL_SELECT_ZOOM;
 
         if (needsZoom) {
-            // Hide existing highlight during animation
             if (selectedHighlightRef.current) {
                 mapRef.current.removeLayer(selectedHighlightRef.current);
                 selectedHighlightRef.current = null;
             }
 
-            // Smooth animated zoom to pixel, then show highlight
-            mapRef.current.flyTo([lat, lng], PIXEL_SELECT_ZOOM, {
+            // Calculate offset to account for bottom panel (~200px)
+            // Shift map center down so pixel appears higher in viewport
+            const bottomPanelOffset = 120; // pixels
+            const degreesPerPixel = 360 / (256 * Math.pow(2, PIXEL_SELECT_ZOOM));
+            const latOffset = bottomPanelOffset * degreesPerPixel;
+
+            mapRef.current.flyTo([lat - latOffset, lng], PIXEL_SELECT_ZOOM, {
                 duration: 0.8,
                 easeLinearity: 0.25,
             });
 
-            // Show highlight after animation completes
             const onMoveEnd = () => {
                 showSelectionHighlight(px, py, selectedColor);
                 mapRef.current?.off('moveend', onMoveEnd);
             };
             mapRef.current.on('moveend', onMoveEnd);
         } else {
-            // Already zoomed in, show highlight immediately
             showSelectionHighlight(px, py, selectedColor);
         }
     }, [showSelectionHighlight]);
@@ -358,11 +424,27 @@ export function useMap() {
 
     // Dummy functions for compatibility
     const loadVisibleTiles = useCallback(() => {
-        // No longer needed - all data from backend + live events
+        // No longer needed - all data from backend + SSE
     }, []);
 
     const loadInitialTiles = useCallback(async () => {
         // No longer needed - backend loads on mount
+    }, []);
+
+    // Optimistically add a pixel to the recent list (for instant UI feedback)
+    const addOptimisticPixel = useCallback((px: number, py: number, color: number, user: string) => {
+        const pixelEvent: PixelPlacedEvent = {
+            user,
+            x: BigInt(px),
+            y: BigInt(py),
+            color,
+            timestamp: BigInt(Math.floor(Date.now() / 1000)),
+        };
+        setBackendPixels(prev => {
+            // Check if pixel already exists at this position (avoid duplicates)
+            const filtered = prev.filter(p => !(Number(p.x) === px && Number(p.y) === py));
+            return [pixelEvent, ...filtered].slice(0, 50);
+        });
     }, []);
 
     return {
@@ -382,8 +464,10 @@ export function useMap() {
         isLoadingFromBackend,
         initializeMap,
         backendPixels,
+        isSSEConnected,
         // Exposed for optimistic UI updates
         updateMarker,
         removeMarker,
+        addOptimisticPixel,
     };
 }

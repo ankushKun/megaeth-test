@@ -157,19 +157,133 @@ export function usePlacePixel() {
 }
 
 // Hook to place a pixel using session key (fire and forget - instant, no wallet popup)
+// Includes automatic retry queue for rate-limited transactions
 export function usePlacePixelWithSessionKey(
   getSessionWalletClient: () => WalletClient<Transport, Chain, Account> | null,
   sessionAddress?: `0x${string}`
 ) {
-  // Track multiple pending transactions for fire-and-forget
+  // Track pending transactions
   const [pendingCount, setPendingCount] = useState(0);
   const [recentHashes, setRecentHashes] = useState<`0x${string}`[]>([]);
   const [error, setError] = useState<Error | null>(null);
   const { refetch: refetchCooldown } = useCooldown(sessionAddress);
 
-  // Fire and forget - send transaction and don't wait for confirmation
+  // Queue for retrying failed transactions
+  const [queue, setQueue] = useState<Array<{ id: string; x: number; y: number; color: number; retryCount: number }>>([]);
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const queueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const getSessionWalletClientRef = useRef(getSessionWalletClient);
+
+  // Keep ref updated
+  useEffect(() => {
+    getSessionWalletClientRef.current = getSessionWalletClient;
+  }, [getSessionWalletClient]);
+
+  // Core send function - throws on error
+  const sendTransaction = useCallback(async (x: number, y: number, color: number): Promise<`0x${string}`> => {
+    const sessionWalletClient = getSessionWalletClientRef.current();
+    if (!sessionWalletClient) {
+      throw new Error('Session key not ready');
+    }
+
+    const txHash = await sessionWalletClient.writeContract({
+      account: sessionAddress,
+      address: MEGAPLACE_ADDRESS,
+      abi: MegaplaceABI as Abi,
+      functionName: 'placePixel',
+      args: [BigInt(x), BigInt(y), color],
+      chain: megaethChain,
+    });
+
+    return txHash;
+  }, []);
+
+  // Process queue item
+  const processQueueItem = useCallback(async () => {
+    setQueue(currentQueue => {
+      if (currentQueue.length === 0) {
+        setIsProcessingQueue(false);
+        return currentQueue;
+      }
+
+      const item = currentQueue[0];
+      setIsProcessingQueue(true);
+
+      // Process async
+      (async () => {
+        try {
+          const txHash = await sendTransaction(item.x, item.y, item.color);
+          console.log(`[Queue] Success for (${item.x}, ${item.y}):`, txHash);
+
+          setRecentHashes(prev => [txHash, ...prev].slice(0, 10));
+          setQueue(prev => prev.filter(i => i.id !== item.id));
+          refetchCooldown();
+
+          // Process next immediately
+          queueTimeoutRef.current = setTimeout(() => processQueueItem(), 50);
+
+        } catch (err: any) {
+          const errorMessage = err?.message || 'Unknown error';
+          const isRateLimit = errorMessage.includes('RateLimitExceeded') ||
+            errorMessage.includes('rate limit') ||
+            errorMessage.includes('-32005');
+          const isInsufficientFunds = errorMessage.includes('insufficient funds');
+
+          if (isInsufficientFunds) {
+            // Don't retry - needs user action
+            console.warn(`[Queue] Insufficient funds, removing (${item.x}, ${item.y})`);
+            setQueue(prev => prev.filter(i => i.id !== item.id));
+            toast.error('Session key needs funding', {
+              description: 'Fund your session key to place pixels',
+            });
+            queueTimeoutRef.current = setTimeout(() => processQueueItem(), 50);
+            return;
+          }
+
+          const MAX_RETRIES = 5;
+          if (item.retryCount >= MAX_RETRIES) {
+            console.warn(`[Queue] Max retries for (${item.x}, ${item.y})`);
+            setQueue(prev => prev.filter(i => i.id !== item.id));
+            queueTimeoutRef.current = setTimeout(() => processQueueItem(), 50);
+            return;
+          }
+
+          // Update retry count
+          setQueue(prev => prev.map(i =>
+            i.id === item.id ? { ...i, retryCount: i.retryCount + 1 } : i
+          ));
+
+          // Calculate delay - 5.5s for rate limit, exponential backoff otherwise
+          const delay = isRateLimit ? 5500 : Math.min(1000 * Math.pow(2, item.retryCount), 30000);
+          console.log(`[Queue] Retrying (${item.x}, ${item.y}) in ${delay}ms (attempt ${item.retryCount + 1}/${MAX_RETRIES})`);
+
+          queueTimeoutRef.current = setTimeout(() => processQueueItem(), delay);
+        }
+      })();
+
+      return currentQueue;
+    });
+  }, [sendTransaction, refetchCooldown]);
+
+  // Start queue processing when items added
+  useEffect(() => {
+    if (queue.length > 0 && !isProcessingQueue) {
+      processQueueItem();
+    }
+  }, [queue.length, isProcessingQueue, processQueueItem]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (queueTimeoutRef.current) {
+        clearTimeout(queueTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Main place pixel function - tries immediately, queues on failure
   const placePixel = useCallback(async (x: number, y: number, color: number) => {
-    const sessionWalletClient = getSessionWalletClient();
+    const sessionWalletClient = getSessionWalletClientRef.current();
     if (!sessionWalletClient) {
       toast.error('Session key not ready');
       return;
@@ -179,53 +293,66 @@ export function usePlacePixelWithSessionKey(
     setError(null);
 
     try {
-      // Send transaction using session key - fire and forget!
-      // @ts-expect-error - account is already in the wallet client
-      const txHash = await sessionWalletClient.writeContract({
-        address: MEGAPLACE_ADDRESS,
-        abi: MegaplaceABI as Abi,
-        functionName: 'placePixel',
-        args: [BigInt(x), BigInt(y), color],
-        chain: megaethChain,
-      });
-
+      const txHash = await sendTransaction(x, y, color);
       console.log(`[Session Key] Tx sent for (${x}, ${y}):`, txHash);
-
-      // Keep track of recent hashes (for UI display if needed)
       setRecentHashes(prev => [txHash, ...prev].slice(0, 10));
-
-      // Refetch cooldown immediately (optimistic)
       refetchCooldown();
 
     } catch (err: any) {
-      console.error('[Session Key] Failed to place pixel:', err);
+      console.error('[Session Key] Failed, adding to queue:', err);
       setError(err);
 
-      if (err.message?.includes('insufficient funds')) {
+      const errorMessage = err?.message || '';
+      const isRateLimit = errorMessage.includes('RateLimitExceeded') ||
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('-32005');
+      const isInsufficientFunds = errorMessage.includes('insufficient funds');
+
+      if (isInsufficientFunds) {
         toast.error('Session key needs funding', {
           description: 'Fund your session key to place pixels',
         });
-      } else if (err.message?.includes('RateLimitExceeded')) {
-        toast.error('Rate limit reached', {
-          description: 'Wait for cooldown to place more pixels',
+      } else if (isRateLimit) {
+        // Add to queue for retry
+        const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setQueue(prev => [...prev, { id, x, y, color, retryCount: 0 }]);
+        toast.info('Pixel queued', {
+          description: `Rate limited - will retry automatically (${queue.length + 1} in queue)`,
+          duration: 2000,
         });
       } else {
-        // Don't spam errors for rapid clicking
-        console.warn('Pixel placement error:', err.message);
+        // Other errors - also queue for retry
+        const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        setQueue(prev => [...prev, { id, x, y, color, retryCount: 0 }]);
+        console.warn('Pixel queued for retry:', err.message);
       }
     } finally {
       setPendingCount(c => Math.max(0, c - 1));
     }
-  }, [getSessionWalletClient, refetchCooldown]);
+  }, [sendTransaction, refetchCooldown, queue.length]);
+
+  // Clear queue
+  const clearQueue = useCallback(() => {
+    setQueue([]);
+    if (queueTimeoutRef.current) {
+      clearTimeout(queueTimeoutRef.current);
+      queueTimeoutRef.current = null;
+    }
+    setIsProcessingQueue(false);
+  }, []);
 
   return {
     placePixel,
     pendingCount,
     recentHashes,
+    // Queue info
+    queueLength: queue.length,
+    isProcessingQueue,
+    clearQueue,
     // Keep old interface for compatibility
     hash: recentHashes[0],
-    isPending: pendingCount > 0,
-    isConfirming: false, // Fire and forget - we don't wait
+    isPending: pendingCount > 0 || queue.length > 0,
+    isConfirming: false,
     isConfirmed: false,
     error,
   };
