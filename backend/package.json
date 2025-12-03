@@ -5,9 +5,9 @@
     "main": "src/index.ts",
     "type": "module",
     "scripts": {
-        "dev": "tsx watch src/index.ts",
+        "dev": "bun run --watch src/index.ts",
         "build": "tsc",
-        "start": "node src/index.ts",
+        "start": "bun run src/index.ts",
         "clean": "rm -rf dist"
     },
     "keywords": [
