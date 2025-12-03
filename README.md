@@ -1,365 +1,55 @@
-# MegaETH Megaplace DApp
+# 🌍 Megaplace
 
-A full-stack decentralized pixel canvas application built on the MegaETH Testnet. This monorepo contains the Solidity smart contracts, an Express backend event listener, and a React-based frontend.
+A decentralized pixel canvas mapped to Earth. Place pixels anywhere on the planet on MegaETH's 10ms block times.
 
-## Project Structure
-
-```
-mega-test/
-├── contracts/              # Smart contract workspace
-│   ├── contracts/         # Solidity source files
-│   │   └── Megaplace.sol # Main pixel canvas contract
-│   ├── scripts/          # Deployment scripts
-│   │   └── deploy.ts     # Auto-updates frontend config
-│   ├── test/             # Contract tests (Hardhat)
-│   ├── hardhat.config.ts # Hardhat configuration
-│   ├── tsconfig.json     # TypeScript config for contracts
-│   ├── package.json      # Contract workspace dependencies
-│   └── .env.example      # Environment variables template
-│
-├── backend/              # Express backend (event listener)
-│   ├── src/
-│   │   ├── index.ts            # Main entry point
-│   │   ├── app.ts              # Express app setup
-│   │   ├── eventListener.ts    # Contract event watcher
-│   │   └── MegaplaceABI.json   # Contract ABI
-│   ├── data/             # JSON storage for pixel data
-│   ├── package.json      # Backend dependencies
-│   ├── tsconfig.json     # TypeScript config
-│   └── README.md         # Backend documentation
-│
-├── frontend/             # React frontend workspace
-│   ├── src/
-│   │   ├── App.tsx       # Main application
-│   │   ├── components/   # React components
-│   │   ├── hooks/        # Custom Web3 hooks
-│   │   ├── services/     # API services
-│   │   │   └── backendApi.ts   # Backend API client
-│   │   └── contracts/    # Auto-generated from deployment
-│   │       ├── config.ts           # Contract address & network
-│   │       └── MegaplaceABI.json   # Contract ABI
-│   ├── package.json      # Frontend dependencies
-│   └── vite.config.ts    # Vite build configuration
-│
-├── package.json          # Root workspace orchestration
-└── README.md            # This file
-```
-
-## Architecture
-
-### 1. Smart Contract (Solidity)
-- Stores pixel placement data on-chain
-- Emits `PixelPlaced` events
-- Optimized for gas efficiency with packed structs
-- Rate limiting and premium access features
-
-### 2. Backend (Node.js + Express)
-- **Event Listener**: Syncs historical events and watches for new ones
-- **JSON Storage**: Stores pixel data for fast retrieval
-- **REST API**: Provides endpoints for frontend to fetch pixel data
-- **Benefits**:
-  - Reduces RPC calls from frontend
-  - Fast initial load
-  - Persistent cache across sessions
-
-### 3. Frontend (React + Vite)
-- **Initial Load**: Fetches all pixels from backend API
-- **Real-time Updates**: Listens to contract events directly
-- **Hybrid Approach**: Best of both worlds - fast load + real-time sync
-- Interactive map interface with Leaflet
-
-## Technology Stack
-
-### Smart Contracts
-- **Solidity** 0.8.30 - Smart contract language
-- **Hardhat** 2.19.0 - Development framework
-- **OpenZeppelin** 5.0.0 - Contract standards
-- **TypeScript** - Type-safe scripting
-- **Mocha + Chai** - Testing framework
-
-### Backend
-- **Express** 4.18.2 - Web framework
-- **Viem** 2.21.54 - Ethereum client
-- **TypeScript** 5.3.3 - Type safety
-- **Compression** - Response compression
-- **CORS** - Cross-origin support
-
-### Frontend
-- **React** 18.3.1 - UI framework
-- **TypeScript** 5.9.3 - Type safety
-- **Vite** 7.2.4 - Build tool
-- **Wagmi** 3.0.1 - React hooks for Web3
-- **Viem** 2.39.3 - Ethereum utilities
-- **React Query** - Data fetching & caching
-
-### Network
-- **MegaETH Testnet** (Chain ID: 6343)
-- **RPC**: https://timothy.megaeth.com/rpc
-- **Explorer**: https://megaexplorer.xyz
-
-## Quick Start
-
-### Prerequisites
-- **Bun** (recommended) or Node.js v18+
-- MetaMask or compatible Web3 wallet
-- MegaETH testnet ETH (for deployment)
-
-### Installation
-
-```bash
-# Install all dependencies (root + contracts + frontend)
-bun install
-
-# Or install individually
-cd contracts && bun install
-cd ../frontend && bun install
-```
-
-### Environment Setup
-
-1. Create environment file in contracts directory:
-```bash
-cd contracts
-cp .env.example .env
-```
-
-2. Edit `.env` and add your private key:
-```env
-PRIVATE_KEY=your_private_key_here
-```
-
-> ⚠️ **Never commit your `.env` file!** It's already in `.gitignore`
-
-## Development Workflow
-
-### Option 1: Using Root Scripts (Recommended)
-
-All commands run from the project root:
-
-```bash
-# Compile contracts
-bun run contracts:compile
-
-# Run contract tests
-bun run contracts:test
-
-# Deploy to MegaETH (auto-updates frontend config)
-bun run contracts:deploy
-
-# Start frontend dev server
-bun run dev
-# or
-bun run frontend:dev
-
-# Build everything (contracts + frontend)
-bun run build
-
-# Clean build artifacts
-bun run clean
-```
-
-### Option 2: Direct Workspace Commands
-
-#### Smart Contracts (in `/contracts`)
-
-```bash
-cd contracts
-
-# Compile contracts
-bun run compile
-
-# Run tests
-bun run test
-
-# Deploy to MegaETH testnet
-bun run deploy
-
-# Deploy to local Hardhat network
-bun run deploy:local
-
-# Verify contract on explorer
-bun run verify
-
-# Clean artifacts
-bun run clean
-```
-
-#### Frontend (in `/frontend`)
-
-```bash
-cd frontend
-
-# Start development server
-bun run dev
-
-# Build for production
-bun run build
-
-# Preview production build
-bun run preview
-```
-
-## Deployment Process
-
-The deployment script automatically handles frontend configuration:
-
-1. **Compile Contracts**
-   ```bash
-   bun run contracts:compile
-   ```
-
-2. **Deploy to MegaETH**
-   ```bash
-   bun run contracts:deploy
-   ```
-
-   This will:
-   - Deploy the Megaplace contract
-   - Copy the ABI to `frontend/src/contracts/MegaplaceABI.json`
-   - Update the contract address in `frontend/src/contracts/config.ts`
-   - Display the verification command
-
-3. **Start Frontend**
-   ```bash
-   bun run dev
-   ```
-
-### One-Command Deploy & Run
-
-```bash
-# From root: compile, deploy, and update frontend config
-bun run deploy
-
-# Then start the dev server
-bun run dev
-```
-
-## Smart Contract Features
-
-### Megaplace.sol
-
-A decentralized pixel canvas where users can place colored pixels on a shared canvas.
-
-**Core Functions:**
-- `placePixel(uint256 x, uint256 y, uint24 color)` - Place a pixel on the canvas
-- `getPixel(uint256 x, uint256 y)` - Get pixel data at coordinates
-- `getCanvas()` - Get the entire canvas state
-- Canvas dimensions and pixel management
-
-**Events:**
-- `PixelPlaced(address indexed placer, uint256 x, uint256 y, uint24 color, uint256 timestamp)`
-
-## Frontend Features
-
-- **Wallet Connection** - MetaMask integration via Wagmi
-- **Interactive Canvas** - Click to place pixels
-- **Real-time Updates** - WebSocket event listeners
-- **Color Picker** - Choose your pixel color
-- **Transaction Status** - Live feedback for pixel placement
-- **Canvas Viewing** - See the collaborative artwork
-
-## Testing
-
-```bash
-# Run all contract tests
-bun run test
-
-# Run tests with gas reporting
-cd contracts
-bun run test
-```
-
-## Network Configuration
-
-### MegaETH Testnet
-
-- **Chain ID**: 6343
-- **RPC URL**: https://timothy.megaeth.com/rpc
-- **WebSocket**: wss://timothy.megaeth.com/rpc
-- **Explorer**: https://megaexplorer.xyz
-- **Block Explorer**: https://megaeth-testnet-v2.blockscout.com
-
-### Add to MetaMask
-
-1. Open MetaMask
-2. Click network dropdown → Add Network
-3. Enter:
-   - Network Name: `MegaETH Testnet`
-   - RPC URL: `https://timothy.megaeth.com/rpc`
-   - Chain ID: `6343`
-   - Symbol: `ETH`
-   - Explorer: `https://megaexplorer.xyz`
-
-## Troubleshooting
-
-### Common Issues
-
-**"PRIVATE_KEY not found"**
-- Create a `.env` file in the `contracts/` directory
-- Add your private key (without `0x` prefix)
-
-**"Insufficient funds"**
-- Get testnet ETH from the MegaETH faucet
-- Check your balance on the explorer
-
-**"Contract not deployed"**
-- Run `bun run contracts:deploy` first
-- Check that `frontend/src/contracts/config.ts` has the correct address
-
-**"Wrong network"**
-- Ensure MetaMask is connected to MegaETH Testnet (Chain ID: 6343)
-- Check network configuration in MetaMask
-
-**Build errors**
-- Clear artifacts: `bun run clean`
-- Reinstall dependencies: `rm -rf node_modules && bun install`
-
-## Scripts Reference
-
-### Root Package Scripts
-
-| Command                     | Description                         |
-| --------------------------- | ----------------------------------- |
-| `bun run contracts:compile` | Compile smart contracts             |
-| `bun run contracts:test`    | Run contract tests                  |
-| `bun run contracts:deploy`  | Deploy to MegaETH + update frontend |
-| `bun run contracts:verify`  | Verify contract on explorer         |
-| `bun run frontend:dev`      | Start frontend dev server           |
-| `bun run frontend:build`    | Build frontend for production       |
-| `bun run dev`               | Start frontend (alias)              |
-| `bun run build`             | Build contracts + frontend          |
-| `bun run deploy`            | Compile + deploy contracts          |
-| `bun run test`              | Run contract tests                  |
-| `bun run clean`             | Clean all build artifacts           |
-
-## Project Highlights
-
-- **Monorepo Structure** - Organized workspace management
-- **Auto-Configuration** - Deployment script updates frontend automatically
-- **Type Safety** - Full TypeScript support across the stack
-- **Modern Tooling** - Vite, Wagmi, React Query
-- **Real-time Updates** - WebSocket event subscriptions
-- **Developer Experience** - Hot reload, fast builds, clear error messages
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions:
-- Check the [Troubleshooting](#troubleshooting) section
-- Review MegaETH documentation
-- Open an issue on GitHub
+**[Live Demo →](https://ankush.one/megaplace)**
 
 ---
 
-Built with ❤️ for the MegaETH ecosystem
+## ✨ What's Cool
+
+**🗺️ Earth-Scale Canvas**  
+~1 trillion pixels using Web Mercator projection. Zoom from continents down to individual pixels at any location on Earth.
+
+**⚡ Real-Time on MegaETH**  
+10ms blocks mean your pixels appear instantly. No waiting, no batching.
+
+**🔑 Session Keys**  
+Sign once, place many. No wallet popup for every pixel—gasless UX with delegated signing.
+
+**📡 Live Sync**  
+Server-Sent Events stream every pixel placement globally in real-time.
+
+**💎 Premium Mode**  
+Pay 0.01 ETH for 2 hours of unlimited placement (no rate limits).
+
+---
+
+## 🏗️ Stack
+
+| Layer             | Tech                              |
+| ----------------- | --------------------------------- |
+| Contract          | Solidity • Hardhat • OpenZeppelin |
+| Backend (caching) | Bun • Express • Viem              |
+| Frontend          | React • Vite • Wagmi • Leaflet    |
+| Network           | MegaETH Testnet (Chain 6343)      |
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Install
+bun install
+
+# Deploy contract (updates frontend config automatically)
+bun run contracts:deploy
+
+# Run frontend
+bun run dev
+```
+
+---
+
+
+Built for the MegaETH ecosystem 🔥
